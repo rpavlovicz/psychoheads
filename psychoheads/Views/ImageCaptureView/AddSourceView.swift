@@ -129,7 +129,7 @@ struct AddSourceView: View {
                     }
                     
                     
-                    let yearList = [""] + (1970...constants.getCurrentYear()).reversed().map(String.init)
+                    let yearList = [""] + (1969...constants.getCurrentYear()).reversed().map(String.init)
                     Picker("Year", selection: $sourceYear) {
                         ForEach(yearList, id: \.self) { val in
                             Text(val)
@@ -237,6 +237,10 @@ struct AddSourceView: View {
                     Button {
                         guard !isSubmitting else { return } // prevent accidental double-submits
                         isSubmitting = true
+                        
+                        sourceTitle = sourceTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                        sourceMonth = sourceMonth.trimmingCharacters(in: .whitespacesAndNewlines)
+                        sourceIssue = sourceIssue.trimmingCharacters(in: .whitespacesAndNewlines)
                         
                         // TODO: refactor to move most of this to DatabaseFunctions
                         // create array of document fields and values

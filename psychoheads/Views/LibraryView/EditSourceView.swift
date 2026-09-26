@@ -46,16 +46,16 @@ struct EditSourceView: View {
     @State private var saveErrorMessage: String = ""
     
     private let sourceOptions = ["", "Magazine", "Book", "Other"]
-    private let years = [""] + (1970...Calendar.current.component(.year, from: Date())).reversed().map(String.init)
+    private let years = [""] + (1969...Calendar.current.component(.year, from: Date())).reversed().map(String.init)
     private let dayOptions = [""] + (1...31).map(String.init)
     
     private var hasChanges: Bool {
-        normalized(title) != normalized(originalData.title) ||
-        normalized(type) != normalized(originalData.type) ||
-        normalized(year) != normalized(originalData.year) ||
-        normalized(month) != normalized(originalData.month) ||
-        normalized(day) != normalized(originalData.day) ||
-        normalized(issue) != normalized(originalData.issue) ||
+        title != originalData.title ||
+        type != originalData.type ||
+        year != originalData.year ||
+        month != originalData.month ||
+        day != originalData.day ||
+        issue != originalData.issue ||
         ncopies != originalData.ncopies
     }
     
@@ -63,10 +63,6 @@ struct EditSourceView: View {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !type.isEmpty &&
         !year.isEmpty
-    }
-    
-    private func normalized(_ value: String?) -> String {
-        (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
     
     init(source: Source) {
