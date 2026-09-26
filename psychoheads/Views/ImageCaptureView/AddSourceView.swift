@@ -27,7 +27,7 @@ struct AddSourceView: View {
     }
     
     enum ActiveAlert: Identifiable {
-        case success, duplicate
+        case success, duplicate, uploadError
         
         var id: Int {
             switch self {
@@ -35,6 +35,8 @@ struct AddSourceView: View {
                 return 1
             case .duplicate:
                 return 2
+            case .uploadError:
+                return 3
             }
         }
     }
@@ -75,8 +77,10 @@ struct AddSourceView: View {
     }
     @State private var isPressed = false
     @State private var isAdded = false
+    @State private var isSubmitting = false
     @Environment(\.presentationMode) var presentationMode
     @State private var activeAlert: ActiveAlert? = nil
+    @State private var errorMessage: String = ""
     
     var body: some View{
         
@@ -231,6 +235,8 @@ struct AddSourceView: View {
                     
                     // MARK: - button to add new source data
                     Button {
+                        guard !isSubmitting else { return } // prevent accidental double-submits
+                        isSubmitting = true
                         
                         // TODO: refactor to move most of this to DatabaseFunctions
                         // create array of document fields and values
@@ -257,6 +263,11 @@ struct AddSourceView: View {
                         query.getDocuments { (querySnapshot, error) in
                             if let error = error {
                                 print("error getting document from database: \(error)")
+                                DispatchQueue.main.async {
+                                    isSubmitting = false
+                                    errorMessage = "Could not save to database: \(error.localizedDescription)"
+                                    activeAlert = .uploadError
+                                }
                             } else {
                                 // if no matches found, make new db entry
                                 if querySnapshot!.documents.count == 0 {
@@ -292,11 +303,13 @@ struct AddSourceView: View {
                                     isAdded = true
                                     sourceModel.updateSources()
                                     activeAlert = .success
+                                    isSubmitting = false
                                     
                                 } else {
                                     
                                     //
                                     activeAlert = .duplicate
+                                    isSubmitting = false
                                     
                                 } // end of adding database items
                                 
@@ -325,10 +338,16 @@ struct AddSourceView: View {
                         } // getDocuments query
                         
                     } label: {
-                        Text("Add to Database")
+                        if isSubmitting {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(0.9)
+                        } else {
+                            Text("Add to Database")
+                        }
                     }
-                    .disabled(!isFormComplete || isAdded)
-                    .buttonStyle(ButtonStyle1(inputColor: isFormComplete && !isAdded ? .blue : .gray))
+                    .disabled(!isFormComplete || isAdded || isSubmitting)
+                    .buttonStyle(ButtonStyle1(inputColor: isFormComplete && !isAdded && !isSubmitting ? .blue : .gray))
                     .padding(.bottom, 30)
                     .padding(.horizontal,40)
                     
@@ -355,6 +374,10 @@ struct AddSourceView: View {
                 }),
                              secondaryButton: .cancel(Text("Dismiss"))
                 )
+            case .uploadError:
+                return Alert(title: Text("Upload failed"),
+                             message: Text(errorMessage),
+                             dismissButton: .default(Text("OK")))
             }
         } // end alert
         

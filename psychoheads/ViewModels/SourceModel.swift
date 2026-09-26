@@ -62,6 +62,7 @@ class SourceModel: ObservableObject {
                     let s = Source()
                     
                     s.id = doc.documentID
+                    s.type = doc["sourcetype"] as? String ?? doc["type"] as? String ?? ""
                     s.title = doc["title"] as? String ?? ""
                     s.year = doc["year"] as? String ?? ""
                     s.month = doc["month"] as? String ?? ""
@@ -797,6 +798,13 @@ class SourceModel: ObservableObject {
 
     var sourcesAddedCurrentYear: Int {
         sources.filter { Calendar.current.component(.year, from: $0.added) == currentYear }.count
+    }
+    
+    var sourcesClippedCurrentYear: Int {
+        sources.filter {
+            Calendar.current.component(.year, from: $0.added) == currentYear &&
+            !$0.clippings.isEmpty
+        }.count
     }
 
     var clippingsAddedCurrentYear: Int {

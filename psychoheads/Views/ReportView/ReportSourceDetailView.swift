@@ -48,6 +48,11 @@ struct ReportSourceDetailView: View {
             }
             .frame(height: 250)
             
+            Section(header: Text("sources with more than one copy")) {
+                ReportMultiCopySourcesView()
+            }
+            .frame(height: 250)
+            
             Section(header: Text("average number of clippings per source")) {
                 
                 ReportAverageClippingsChartView()

@@ -29,6 +29,10 @@ struct SearchClippingView: View {
     @State private var isTagSearchActive: Bool = false
     @State private var expandSheet: Bool = false
     
+    // Add state for swipe sheet presentation
+    @State private var showSwipeSheet: Bool = false
+    @State private var swipeStartIndex: Int = 0
+    
     @State private var searchHeads: Bool = true
     @State private var searchTags: Bool = false
     @State private var searchAllHeads: Bool = false
@@ -55,7 +59,7 @@ struct SearchClippingView: View {
     
     // Dynamic range calculation
     var dynamicHeightRange: ClosedRange<Double> {
-        let allClippings = sourceModel.sources.flatMap { $0.clippings }
+        let allClippings = sourceModel.clippings
         let heights = allClippings.map { $0.height }.filter { $0 > 0 }
         
         guard !heights.isEmpty else { return 3.0...15.0 }
@@ -109,16 +113,17 @@ struct SearchClippingView: View {
                 return !clipping.isHead || directionMatch
             }
         } else {
-            let allClippings = sourceModel.sources.flatMap { $0.clippings }
+            let allClippings = sourceModel.clippings
             
             // First, filter by All Heads or All Bodies if selected
             var filteredClippings = allClippings
             if searchAllHeads {
+                // All Heads: only clippings that are heads but NOT bodies
                 filteredClippings = filteredClippings.filter { $0.isHead && !$0.isBody }
+            } else if searchAllBodies {
+                // All Bodies: clippings that are bodies (can also be heads)
+                filteredClippings = filteredClippings.filter { $0.isBody }
             }
-//                else if searchAllBodies {
-//                filteredClippings = filteredClippings.filter { $0.isBody }
-//            }
             
             // Apply gender filters
             let activeGenderFilters = [filterMan, filterWoman, filterTrans].filter { $0 }
@@ -170,6 +175,17 @@ struct SearchClippingView: View {
                     tag.lowercased().contains(searchText.lowercased())
                 }
                 
+                // If animal or black & white filters are active, show all matching clippings
+                let hasDisplayFilter = filterAnimal || filterBlackAndWhite
+                if hasDisplayFilter {
+                    let hasTextFilter = !searchText.isEmpty && (searchHeads || searchTags)
+                    if hasTextFilter {
+                        return nameMatch || tagMatch
+                    } else {
+                        return true // Show all clippings matching the display filter when no text filter
+                    }
+                }
+                
                 // If All Heads is selected, show all head clippings (with optional text filtering)
                 if searchAllHeads {
                     let hasTextFilter = !searchText.isEmpty && (searchHeads || searchTags)
@@ -191,9 +207,15 @@ struct SearchClippingView: View {
                     return nameMatch || tagMatch
                 }
             }.filter { clipping in
-                // Apply direction filter to head clippings only
-                let directionMatch = (clipping.isHead && !clipping.isBody) && (lookingDirection == nil || clipping.lookingDirection == lookingDirection?.rawValue)
-                return !clipping.isHead || directionMatch
+                // Apply direction filter to head clippings only (but not to body clippings)
+                if clipping.isHead && !clipping.isBody {
+                    // Only apply direction filter to pure head clippings
+                    let directionMatch = lookingDirection == nil || clipping.lookingDirection == lookingDirection?.rawValue
+                    return directionMatch
+                } else {
+                    // For body clippings or mixed head/body clippings, don't apply direction filter
+                    return true
+                }
             }
         }
     }
@@ -204,11 +226,16 @@ struct SearchClippingView: View {
             
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))]) {
-                    ForEach(filteredClippings, id: \.id) { clipping in
+                    ForEach(Array(filteredClippings.enumerated()), id: \.element.id) { index, clipping in
                         
-                        NavigationLink(value: SelectionState.clippingView(clipping), label: {
+                        // Replace NavigationLink with Button to trigger sheet
+                        Button(action: {
+                            swipeStartIndex = index
+                            showSwipeSheet = true
+                        }) {
                             AsyncImage1(clipping: clipping, placeholder: placeholderImage ?? UIImage())
-                        })
+                        }
+                        .buttonStyle(PlainButtonStyle())
                         
                     }
                 }
@@ -252,7 +279,7 @@ struct SearchClippingView: View {
                     }
                 }
                 .background(Color.clear) // Set the background to clear
-                .presentationDetents([.medium, .large])
+                .presentationDetents(UIDevice.current.userInterfaceIdiom == .pad ? [.large] : [.medium, .large])
             }
             .background(Color.clear) // Set the background to clear
 
@@ -310,6 +337,36 @@ struct SearchClippingView: View {
                 }
             
         } // main VStack
+        // Sheet presentation for ClippingsSwipeView
+        .sheet(isPresented: $showSwipeSheet) {
+            NavigationStack {
+                ClippingsSwipeView(clippings: filteredClippings, currentIndex: $swipeStartIndex)
+                    .environmentObject(sourceModel)
+                    .environmentObject(navigationStateManager)
+                    .environment(\.managedObjectContext, managedObjectContext)
+                    .navigationDestination(for: SelectionState.self) { state in
+                        switch state {
+                        case .sourceView(let source):
+                            LibrarySourceView(source: source)
+                                .environmentObject(sourceModel)
+                                .environmentObject(navigationStateManager)
+                                .environment(\.managedObjectContext, managedObjectContext)
+                        case .editClippingView(let clipping):
+                            EditClippingView(clipping: clipping)
+                                .environmentObject(sourceModel)
+                                .environmentObject(navigationStateManager)
+                                .environment(\.managedObjectContext, managedObjectContext)
+                        case .editClippingSourceView(let clipping):
+                            EditClippingSourceView(clipping: clipping)
+                                .environmentObject(sourceModel)
+                                .environmentObject(navigationStateManager)
+                        default:
+                            EmptyView()
+                        }
+                    }
+            }
+            .presentationSizing(.page)
+        }
         
         
     }

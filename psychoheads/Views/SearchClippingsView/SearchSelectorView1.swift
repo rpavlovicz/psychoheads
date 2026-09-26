@@ -117,10 +117,18 @@ struct SearchSelectorView1: View {
                             .fill(Color(.systemGray3))
                             .frame(width: 1, height: 25)
                         Spacer()
+                        Rectangle()
+                            .fill(Color(.systemGray3))
+                            .frame(width: 1, height: 25)
+                        Spacer()
+                        Rectangle()
+                            .fill(Color(.systemGray3))
+                            .frame(width: 1, height: 25)
+                        Spacer()
                     }.padding(.horizontal, 2)
                         
                     HStack(spacing: 5) {
-                        Button("All Heads") {
+                        Button("Heads") {
                             searchAllHeads.toggle()
                             if searchAllHeads {
                                 searchAllBodies = false // Ensure only one is selected
@@ -128,13 +136,23 @@ struct SearchSelectorView1: View {
                         }
                         .buttonStyle(ButtonStyle2(inputColor: searchAllHeads ? Color(.secondarySystemGroupedBackground) : Color(.systemGray5)))
 
-                        Button("All Bodies") {
+                        Button("Bodies") {
                             searchAllBodies.toggle()
                             if searchAllBodies {
                                 searchAllHeads = false // Ensure only one is selected
                             }
                         }
                         .buttonStyle(ButtonStyle2(inputColor: searchAllBodies ? Color(.secondarySystemGroupedBackground) : Color(.systemGray5)))
+
+                        Button("Animal") {
+                            filterAnimal.toggle()
+                        }
+                        .buttonStyle(ButtonStyle2(inputColor: filterAnimal ? Color(.secondarySystemGroupedBackground) : Color(.systemGray5)))
+
+                        Button("B&W") {
+                            filterBlackAndWhite.toggle()
+                        }
+                        .buttonStyle(ButtonStyle2(inputColor: filterBlackAndWhite ? Color(.secondarySystemGroupedBackground) : Color(.systemGray5)))
 
                     } // HStack
                     .padding(.horizontal,4)
@@ -154,6 +172,18 @@ struct SearchSelectorView1: View {
                         Text("• Showing all clippings (heads, bodies, etc.)")
                             .font(.caption2)
                             .foregroundColor(.secondary)
+                    }
+                    
+                    if filterAnimal {
+                        Text("• Filtering for animal clippings")
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                    }
+                    
+                    if filterBlackAndWhite {
+                        Text("• Filtering for black & white clippings")
+                            .font(.caption2)
+                            .foregroundColor(.purple)
                     }
                 }
                 .padding(.leading, 4)
@@ -298,62 +328,7 @@ struct SearchSelectorView1: View {
                 .padding(.leading, 4)
             }
             
-            // Type Filter Section
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Type Filter")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.leading, 4)
-                
-                ZStack(alignment: .center) {
-                    RoundedRectangle(cornerRadius: 7)
-                        .fill(Color(.systemGray5))
-                        .frame(height: 35)
-                    HStack {
-                        Spacer()
-                        Rectangle()
-                            .fill(Color(.systemGray3))
-                            .frame(width: 1, height: 25)
-                        Spacer()
-                    }.padding(.horizontal, 2)
-                        
-                    HStack(spacing: 5) {
-                        Button("Animal") {
-                            filterAnimal.toggle()
-                        }
-                        .buttonStyle(ButtonStyle2(inputColor: filterAnimal ? Color(.secondarySystemGroupedBackground) : Color(.systemGray5)))
 
-                        Button("Black & White") {
-                            filterBlackAndWhite.toggle()
-                        }
-                        .buttonStyle(ButtonStyle2(inputColor: filterBlackAndWhite ? Color(.secondarySystemGroupedBackground) : Color(.systemGray5)))
-
-                    } // HStack
-                    .padding(.horizontal,4)
-                } // ZStack
-                
-                // Help text for type filters
-                VStack(alignment: .leading, spacing: 2) {
-                    if filterAnimal && filterBlackAndWhite {
-                        Text("• Showing only black & white animal clippings")
-                            .font(.caption2)
-                            .foregroundColor(.brown)
-                    } else if filterAnimal {
-                        Text("• Showing only animal clippings")
-                            .font(.caption2)
-                            .foregroundColor(.brown)
-                    } else if filterBlackAndWhite {
-                        Text("• Showing only black & white clippings")
-                            .font(.caption2)
-                            .foregroundColor(.gray)
-                    } else {
-                        Text("• No type filter applied")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .padding(.leading, 4)
-            }
             
             // Height Range Filter Section
             VStack(alignment: .leading, spacing: 6) {

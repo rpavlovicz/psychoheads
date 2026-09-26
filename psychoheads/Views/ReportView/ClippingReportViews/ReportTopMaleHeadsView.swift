@@ -44,14 +44,11 @@ struct ReportTopMaleHeadsView: View {
                 .padding(.bottom)
             
             List(sortedMaleHeadCounts, id: \.name) { head in
-                NavigationLink(value: SelectionState.searchClippings(sourceModel.clippings.filter {
-                    $0.name == head.name && ($0.name.lowercased() != "unknown" || $0.isMan) }), label: {
-                    HStack {
-                        Text(head.name)
-                        Spacer()
-                        Text("\(head.count)")
-                    }
-                })
+                HStack {
+                    Text(head.name)
+                    Spacer()
+                    Text("\(head.count)")
+                }
             }
             .listStyle(PlainListStyle())
         } // VStack

@@ -26,6 +26,8 @@ struct ProgressReportSimpleView: View {
         VStack(alignment: .leading) {
             Text(verbatim: "Sources added in \(sourceModel.currentYear): \(sourceModel.sourcesAddedCurrentYear)")
                 .padding(.bottom, 5)
+            Text(verbatim: "Sources clipped in \(sourceModel.currentYear): \(sourceModel.sourcesClippedCurrentYear)")
+                .padding(.bottom, 5)
             
             Text(verbatim:"Clippings added in \(sourceModel.currentYear): \(sourceModel.clippingsAddedCurrentYear)")
         }
