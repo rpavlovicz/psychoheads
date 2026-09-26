@@ -116,8 +116,7 @@ struct MainView: View {
                             .environment(\.managedObjectContext, viewContext)
 
                     case .edit(let source):
-                        // TODO: Create EditSourceView
-                        Text("Edit Source View for: \(source.title)")
+                        EditSourceView(source: source)
                             .environmentObject(sourceModel)
                             .environmentObject(navigationStateManager)
                             .environment(\.managedObjectContext, viewContext)

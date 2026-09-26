@@ -15,114 +15,183 @@
 
 import SwiftUI
 
+struct OriginalSourceData {
+    let title: String
+    let type: String
+    let year: String
+    let month: String
+    let day: String
+    let issue: String
+    let ncopies: Int
+}
+
 struct EditSourceView: View {
     
     @EnvironmentObject var sourceModel: SourceModel
     @EnvironmentObject var navigationStateManager: NavigationStateManager
     
     @ObservedObject var source: Source
-    @ObservedObject private var sourceCopy: Source
     
-    private var isChanged: Bool {
-        return sourceCopy.hasChanges(comparedTo: source)
+    @State private var title: String
+    @State private var type: String
+    @State private var year: String
+    @State private var month: String
+    @State private var day: String
+    @State private var issue: String
+    @State private var ncopies: Int
+    @State private var originalData: OriginalSourceData
+
+    @State private var isSaving: Bool = false
+    @State private var showSaveError: Bool = false
+    @State private var saveErrorMessage: String = ""
+    
+    private let sourceOptions = ["", "Magazine", "Book", "Other"]
+    private let years = [""] + (1970...Calendar.current.component(.year, from: Date())).reversed().map(String.init)
+    private let dayOptions = [""] + (1...31).map(String.init)
+    
+    private var hasChanges: Bool {
+        normalized(title) != normalized(originalData.title) ||
+        normalized(type) != normalized(originalData.type) ||
+        normalized(year) != normalized(originalData.year) ||
+        normalized(month) != normalized(originalData.month) ||
+        normalized(day) != normalized(originalData.day) ||
+        normalized(issue) != normalized(originalData.issue) ||
+        ncopies != originalData.ncopies
+    }
+    
+    private var isFormValid: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !type.isEmpty &&
+        !year.isEmpty
+    }
+    
+    private func normalized(_ value: String?) -> String {
+        (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
     
     init(source: Source) {
         self.source = source
-        self.sourceCopy = Source(copyFrom: source)
+        let initial = OriginalSourceData(
+            title: source.title,
+            type: source.type,
+            year: source.year,
+            month: source.month ?? "",
+            day: source.day ?? "",
+            issue: source.issue ?? "",
+            ncopies: source.ncopies
+        )
+        _originalData = State(initialValue: initial)
+        _title = State(initialValue: source.title)
+        _type = State(initialValue: source.type)
+        _year = State(initialValue: source.year)
+        _month = State(initialValue: source.month ?? "")
+        _day = State(initialValue: source.day ?? "")
+        _issue = State(initialValue: source.issue ?? "")
+        _ncopies = State(initialValue: source.ncopies)
     }
     
     var body: some View {
-        VStack {
-            Spacer()
-            
-            Text("Edit Source")
-                .font(.title)
-                .padding()
-
-            Text("ncopies")
-                .font(.subheadline)
-                .padding([.top,.bottom], 5)
-            
-            HStack {
-                Button(action: {
-                    withAnimation {
-                        if sourceCopy.ncopies > 1 {
-                            sourceCopy.ncopies -= 1
+        VStack(spacing: 0) {
+            Form {
+                Section(header: Text("Source Details")) {
+                    TextField("Title", text: $title)
+                        .onSubmit {
+                            title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                        }
+                    
+                    Picker("Source Type", selection: $type) {
+                        ForEach(sourceOptions, id: \.self) { option in
+                            Text(option)
                         }
                     }
-                }) {
-                    Text("-")
-                        .font(.largeTitle)
-                }
-                
-                Text("\(sourceCopy.ncopies)")
-                    .font(.largeTitle)
-                    .id(sourceCopy.ncopies)
-                
-                Button(action: {
-                    withAnimation {
-                        sourceCopy.ncopies += 1
+                    
+                    Picker("Year", selection: $year) {
+                        ForEach(years, id: \.self) { year in
+                            Text(year)
+                        }
                     }
-                }) {
-                    Text("+")
-                        .font(.largeTitle)
+                    
+                    TextField("Month/Season", text: $month)
+                        .onSubmit {
+                            month = month.trimmingCharacters(in: .whitespacesAndNewlines)
+                        }
+                    
+                    Picker("Date", selection: $day) {
+                        ForEach(dayOptions, id: \.self) { value in
+                            Text(value)
+                        }
+                    }
+                    
+                    TextField("Issue", text: $issue)
+                        .onSubmit {
+                            issue = issue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        }
+                    
+                    Stepper(value: $ncopies, in: 1...20) {
+                        HStack {
+                            Text("Number of copies")
+                            Spacer()
+                            Text("\(ncopies)")
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
+            }
+            
+            VStack(spacing: 10) {
+                Button {
+                    guard !isSaving else { return }
+                    isSaving = true
+                    
+                    let updatedSource = Source(copyFrom: source)
+                    updatedSource.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    updatedSource.type = type
+                    updatedSource.year = year
+                    updatedSource.month = month.trimmingCharacters(in: .whitespacesAndNewlines)
+                    updatedSource.day = day.trimmingCharacters(in: .whitespacesAndNewlines)
+                    updatedSource.issue = issue.trimmingCharacters(in: .whitespacesAndNewlines)
+                    updatedSource.ncopies = ncopies
+                    
+                    sourceModel.updateSource(updatedSource) { success in
+                        DispatchQueue.main.async {
+                            isSaving = false
+                            if success {
+                                source.update(from: updatedSource)
+                                navigationStateManager.popBack()
+                            } else {
+                                saveErrorMessage = "Could not update source. Please try again."
+                                showSaveError = true
+                            }
+                        }
+                    }
+                } label: {
+                    if isSaving {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    } else {
+                        Text("Save Changes")
+                    }
+                }
+                .disabled(!hasChanges || !isFormValid || isSaving)
+                .buttonStyle(ButtonStyle1(inputColor: (!hasChanges || !isFormValid || isSaving) ? .lightGray : .blue))
+                .padding(.horizontal, 40)
                 
-            }
-            
-            Button("Edit") {
-                if sourceCopy.hasChanges(comparedTo: source) {
-                    print("test")
-                    sourceModel.editSource(sourceCopy)
-                    source.update(from: sourceCopy)
+                Button("Cancel") {
+                    navigationStateManager.popBack()
                 }
-                navigationStateManager.popBack()
+                .buttonStyle(ButtonStyle1(inputColor: .gray))
+                .padding(.horizontal, 40)
+                .padding(.bottom, 10)
             }
-            .disabled(!isChanged)
-            .buttonStyle(ButtonStyle1(inputColor: isChanged ? .blue : .lightGray))
-            .padding(.horizontal, 40)
-            
-            Button("Cancel") {
-                navigationStateManager.popBack()
-            }
-            .buttonStyle(ButtonStyle1(inputColor: .gray))
-            .padding(.horizontal, 40)
-            
-            Spacer()
-            
-            HStack {
-                VStack(alignment: .leading) {
-                    Text("Passed Source").font(.title2)
-                    Text("title = \(source.title)")
-                    Text("type = \(source.type)")
-                    Text("year = \(source.year)")
-                    Text("month = \(source.month ?? "")")
-                    Text("issue = \(source.issue ?? "")")
-                    Text("day = \(source.day ?? "")")
-                    Text("ncopies = \(source.ncopies)")
-                }
-                .padding(.leading)
-                Spacer()
-                VStack(alignment: .leading) {
-                    Text("Copied Source").font(.title2)
-                    Text("title = \(sourceCopy.title)")
-                    Text("type = \(sourceCopy.type)")
-                    Text("year = \(sourceCopy.year)")
-                    Text("month = \(sourceCopy.month ?? "")")
-                    Text("issue = \(sourceCopy.issue ?? "")")
-                    Text("day = \(sourceCopy.day ?? "")")
-                    Text("ncopies = \(sourceCopy.ncopies)")
-                }
-                .padding(.leading)
-            }
-            Text("isChanged = \(String(isChanged))")
-            Text("navigationStateManager count = \(navigationStateManager.selectionPath.count)")
-            
-            
-            
-        } // VStack
+            .padding(.top, 8)
+        }
         .navigationBarBackButtonHidden(true)
+        .navigationTitle("Edit Source")
+        .alert("Update Failed", isPresented: $showSaveError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(saveErrorMessage)
+        }
     }
 }
 
