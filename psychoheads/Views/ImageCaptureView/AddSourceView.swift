@@ -46,6 +46,11 @@ struct AddSourceView: View {
     let image: UIImage?
     @AppStorage("sourceType") private var sourceType: String = ""
     let sourceOptions = ["","Magazine","Book","Other"]
+    private let monthSuggestions = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+        "Spring", "Summer", "Fall", "Autumn", "Winter"
+    ]
     @AppStorage("sourceTitle") private var sourceTitle: String = ""
     @AppStorage("nCopies") private var nCopies: Int = 1
     @AppStorage("sourceYear") private var sourceYear: String = ""
@@ -55,6 +60,7 @@ struct AddSourceView: View {
     
     @FocusState private var focusedField: Field?
     @State private var isTitleFieldActive: Bool = false
+    @State private var isMonthFieldActive: Bool = false
     
     @Environment(\.managedObjectContext) var managedObjectContext
     @FetchRequest(entity: SourceName.entity(), sortDescriptors: [NSSortDescriptor(keyPath: \SourceName.count, ascending: false)]) var sourceNames: FetchedResults<SourceName>
@@ -69,6 +75,22 @@ struct AddSourceView: View {
             }
         }
         return sources
+    }
+    
+    /// Static months/seasons plus distinct non-empty month values already used on sources.
+    private var allMonthSuggestions: [String] {
+        var seen = Set(monthSuggestions.map { $0.lowercased() })
+        var result = monthSuggestions
+        for source in sourceModel.sources {
+            let month = (source.month ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !month.isEmpty else { continue }
+            let key = month.lowercased()
+            if !seen.contains(key) {
+                seen.insert(key)
+                result.append(month)
+            }
+        }
+        return result
     }
     
     let constants = Constants()
@@ -111,6 +133,7 @@ struct AddSourceView: View {
                         .focused($focusedField, equals: .titleField)
                         .onChange(of: focusedField) { newValue in
                             isTitleFieldActive = (newValue == .titleField)
+                            isMonthFieldActive = (newValue == .monthField)
                         }
                     
                     let sortedTitleNames = existingSourceNames.filter({ sourceText in sourceTitle == "" ? true : sourceText.lowercased().contains(sourceTitle.lowercased())})
@@ -141,6 +164,23 @@ struct AddSourceView: View {
                             sourceMonth = sourceMonth.trimmingCharacters(in: .whitespacesAndNewlines)
                         }
                         .focused($focusedField, equals: .monthField)
+                    
+                    let sortedMonthSuggestions = allMonthSuggestions.filter {
+                        sourceMonth.isEmpty || $0.lowercased().contains(sourceMonth.lowercased())
+                    }
+                    
+                    if isMonthFieldActive && !sortedMonthSuggestions.isEmpty {
+                        ScrollView(.horizontal) {
+                            HStack {
+                                ForEach(sortedMonthSuggestions, id: \.self) { monthName in
+                                    TagView2(tag: monthName) {
+                                        sourceMonth = monthName
+                                        focusedField = nil
+                                    }
+                                }
+                            }
+                        }
+                    }
                     
                     let dateList = [""] + (1...31).map(String.init)
                     Picker("Date", selection: $sourceDay) {

@@ -250,7 +250,7 @@ struct LibraryView: View {
                         NavigationLink(value: SelectionState.sourceView(source), label: {
                             SourceRowView2(source: source, displayMode: isThumbnailMode ? .thumbnail : .minimal)
                                 .environmentObject(source)
-                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                     NavigationLink(value: SelectionState.edit(source), label: { Label("Edit", systemImage: "pencil")})
                                         .tint(.blue)
 
@@ -300,8 +300,11 @@ struct LibraryView: View {
             Alert(title: Text("Delete Source"),
                   message: Text("Are you sure you want to delete this source from the database?"),
                   primaryButton: .destructive(Text("Delete")) {
-                if let source = sourceToDelete {
-                    sourceModel.deleteSource(source)
+                guard let source = sourceToDelete else { return }
+                DeviceAuth.authenticate(reason: "Authenticate to delete this source") { success in
+                    if success {
+                        sourceModel.deleteSource(source)
+                    }
                 }
             },
                   secondaryButton: .cancel()

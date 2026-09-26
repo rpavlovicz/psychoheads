@@ -81,8 +81,40 @@ struct ClippingsSwipeView: View {
     }
     
     var body: some View {
-        let clipping = clippings[currentIndex]
-        let source = sourceModel.sources.first { $0.id == clippings[currentIndex].sourceId }
+        Group {
+            if clippings.indices.contains(currentIndex) {
+                clippingContent(for: clippings[currentIndex])
+            } else {
+                EmptyView()
+            }
+        }
+        .padding(.horizontal, 10)
+        .onChange(of: clippings.count) { newCount in
+            if newCount == 0 {
+                dismiss()
+            } else if currentIndex >= newCount {
+                currentIndex = newCount - 1
+            }
+        }
+        .alert(isPresented: $showAlert) {
+            Alert(title: Text("Delete Clipping"),
+                  message: Text("Are you sure you want to delete this clipping from the database?"),
+                  primaryButton: .destructive(Text("Delete")) {
+                guard let clipping = clippingToDelete else { return }
+                DeviceAuth.authenticate(reason: "Authenticate to delete this clipping") { success in
+                    guard success else { return }
+                    performDelete(clipping)
+                }
+            },
+                  secondaryButton: .cancel()
+            )
+        }
+        .frame(maxHeight: .infinity, alignment: .bottom)
+    }
+    
+    @ViewBuilder
+    private func clippingContent(for clipping: Clipping) -> some View {
+        let source = sourceModel.sources.first { $0.id == clipping.sourceId }
         let imageSize = calculateImageSize(for: clipping)
         
         VStack(spacing: 0) {
@@ -211,22 +243,21 @@ struct ClippingsSwipeView: View {
                 }
             )
         } // main view VStack
-        .padding(.horizontal, 10)
-        .alert(isPresented: $showAlert) {
-            Alert(title: Text("Delete Clipping"),
-                  message: Text("Are you sure you want to delete this clipping from the database?"),
-                  primaryButton: .destructive(Text("Delete")) {
-                if let clipping = clippingToDelete {
-                    sourceModel.deleteClipping(clipping)
-                    updateClippingTags(clipping: clipping)
-                    updateHeadNameData(clipping: clipping)
-                    dismiss()
-                }
-            },
-                  secondaryButton: .cancel()
-            )
-        } // alert
-        .frame(maxHeight: .infinity, alignment: .bottom)
+    }
+    
+    private func performDelete(_ clipping: Clipping) {
+        let shouldDismiss = clippings.count <= 1
+        if !shouldDismiss && currentIndex >= clippings.count - 1 && currentIndex > 0 {
+            currentIndex -= 1
+        }
+        
+        if shouldDismiss {
+            dismiss()
+        }
+        
+        sourceModel.deleteClipping(clipping)
+        updateClippingTags(clipping: clipping)
+        updateHeadNameData(clipping: clipping)
     }
 
     func formatDate(date: Date) -> String {

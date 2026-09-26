@@ -180,13 +180,14 @@ struct ClippingView: View {
             Alert(title: Text("Delete Clipping"),
                   message: Text("Are you sure you want to delete this clipping from the database?"),
                   primaryButton: .destructive(Text("Delete")) {
-                if let clipping = clippingToDelete {
+                guard let clipping = clippingToDelete else { return }
+                DeviceAuth.authenticate(reason: "Authenticate to delete this clipping") { success in
+                    guard success else { return }
                     sourceModel.deleteClipping(clipping)
-                    // navigate back
+                    updateClippingTags(clipping: clipping)
+                    updateHeadNameData(clipping: clipping)
                     navigationStateManager.popBack()
                 }
-                updateClippingTags(clipping: clipping)
-                updateHeadNameData(clipping: clipping)
             },
                   secondaryButton: .cancel()
             )
