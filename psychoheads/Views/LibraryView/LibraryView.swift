@@ -17,11 +17,6 @@ import SwiftUI
 import FirebaseFirestore
 
 struct LibraryView: View {
-    enum SourceSortMode {
-        case alphabetical
-        case dateAdded
-    }
-    
     enum Field: Hashable {
         case sourceSearchField
     }
@@ -42,7 +37,9 @@ struct LibraryView: View {
     @State private var isTagSearchActive: Bool = false
     @State private var isSuggestionListDragging: Bool = false
     @FocusState private var focusedField: Field?
-    @State private var sourceSortMode: SourceSortMode = .dateAdded
+    @State private var sourceSortMode: LibrarySourceSortMode = .publicationDate
+    /// `false` = Date newest-first / Title A→Z; `true` = Date oldest-first / Title Z→A
+    @State private var isSortReversed: Bool = false
     @State private var sourceCoverageFilter: SourceCoverageFilter = .withClippings
     
     // Grid layout properties
@@ -81,20 +78,7 @@ struct LibraryView: View {
             searchText.isEmpty || source.title.lowercased().contains(searchText.lowercased())
         }
         .sorted { lhs, rhs in
-            switch sourceSortMode {
-            case .alphabetical:
-                if lhs.title != rhs.title {
-                    return lhs.title < rhs.title
-                } else {
-                    return lhs.year < rhs.year
-                }
-            case .dateAdded:
-                if lhs.added != rhs.added {
-                    return lhs.added > rhs.added
-                } else {
-                    return lhs.title < rhs.title
-                }
-            }
+            SourcePublicationSortKey.shouldPrecede(lhs, rhs, mode: sourceSortMode, isReversed: isSortReversed)
         }
     }
     
@@ -349,12 +333,29 @@ struct LibraryView: View {
                 }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: {
-                    sourceSortMode = sourceSortMode == .alphabetical ? .dateAdded : .alphabetical
-                }) {
-                    Image(systemName: sourceSortMode == .alphabetical ? "textformat.abc" : "calendar")
+                HStack(spacing: 12) {
+                    Button(action: {
+                        sourceSortMode = sourceSortMode == .alphabetical ? .publicationDate : .alphabetical
+                    }) {
+                        Image(systemName: sourceSortMode == .alphabetical ? "textformat.abc" : "calendar")
+                    }
+                    .accessibilityLabel(
+                        sourceSortMode == .alphabetical
+                        ? "Sorting alphabetically. Tap to sort by publication date."
+                        : "Sorting by publication date. Tap to sort alphabetically."
+                    )
+                    
+                    Button(action: {
+                        isSortReversed.toggle()
+                    }) {
+                        Image(systemName: "arrow.up.arrow.down")
+                    }
+                    .accessibilityLabel(
+                        isSortReversed
+                        ? "Sort inverted. Tap to use default order."
+                        : "Tap to invert sort order."
+                    )
                 }
-                .accessibilityLabel(sourceSortMode == .alphabetical ? "Sorting alphabetically. Tap to sort by date added." : "Sorting by date added. Tap to sort alphabetically.")
             }
         }
     }
