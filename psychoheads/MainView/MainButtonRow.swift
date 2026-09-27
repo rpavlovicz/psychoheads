@@ -109,19 +109,16 @@ struct MainButtonRow: View {
             
             Spacer()
             
-            // Help
-            Button(action: {
-                // Template: Add help functionality later
-                print("Help button tapped")
-            }) {
+            // Diagnostics
+            NavigationLink(value: SelectionState.imageDiagnostics, label: {
                 VStack(spacing: 4) {
-                    Image(systemName: "questionmark.circle.fill")
+                    Image(systemName: "wrench.and.screwdriver")
                         .font(.system(size: 26, weight: .regular))
                         .frame(height: 40)
-                    Text("Help")
+                    Text("Diagnostics")
                         .font(.caption2)
                 }
-            }
+            })
             
             Spacer()
             
@@ -238,19 +235,16 @@ struct MainButtonRow: View {
             
             Spacer()
             
-            // Help
-            Button(action: {
-                // Template: Add help functionality later
-                print("Help button tapped")
-            }) {
+            // Diagnostics
+            NavigationLink(value: SelectionState.imageDiagnostics, label: {
                 VStack(spacing: 4) {
-                    Image(systemName: "questionmark.circle.fill")
+                    Image(systemName: "wrench.and.screwdriver")
                         .font(.system(size: 26, weight: .regular))
                         .frame(height: 40)
-                    Text("Help")
+                    Text("Diagnostics")
                         .font(.caption2)
                 }
-            }
+            })
             
             Spacer()
             

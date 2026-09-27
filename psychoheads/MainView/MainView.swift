@@ -114,6 +114,10 @@ struct MainView: View {
                             .environmentObject(sourceModel)
                             .environmentObject(navigationStateManager)
                             .environment(\.managedObjectContext, viewContext)
+                    case .imageDiagnostics:
+                        ClippingImageDiagnosticsView()
+                            .environmentObject(sourceModel)
+                            .environmentObject(navigationStateManager)
 
                     case .edit(let source):
                         EditSourceView(source: source)

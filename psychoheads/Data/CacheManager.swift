@@ -49,6 +49,14 @@ class CacheManager {
 
         return nil
     }
+
+    func removeCachedImage(forKey key: String) {
+        let nsKey = NSString(string: key)
+        memoryCache.removeObject(forKey: nsKey)
+        if let filePath = documentDirectoryPath()?.appendingPathComponent(key) {
+            try? FileManager.default.removeItem(at: filePath)
+        }
+    }
     
     // Function to print the total cache usage
     func printTotalCacheUsage() {
