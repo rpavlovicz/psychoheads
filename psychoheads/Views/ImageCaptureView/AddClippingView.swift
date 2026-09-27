@@ -765,10 +765,14 @@ struct AddClippingView: View {
                 Button {
                     
                     guard !isSubmitting else { return } // prevent multiple accidental submissions
+                    guard let source = source, let image = image else { return }
                     isSubmitting = true
                     
                     // get Source document from FireStore database
-                    let docRef = sourcesCollection.document(source!.id)
+                    let docRef = sourcesCollection.document(source.id)
+                    let tagsToSave = tags
+                    let nameToSave = name
+                    let shouldUpdateHeadName = isHead && !isBody
                     
                     docRef.getDocument { (documentSnapshot, error) in
                         if let error = error {
@@ -781,120 +785,98 @@ struct AddClippingView: View {
                             return
                         }
                         
-                        if let documentSnapshot = documentSnapshot {
-                            if documentSnapshot.exists {
-                                
-                                // verified that Source document can be accessed
-                                // now create Clipping entry
-                                
-                                let docName = UUID().uuidString
-                                let imagePath = "clippingImages/\(docName).png"
-                                let thumbPath = "clippingImages/\(docName)_thumb.png"
-                                let midsizedPath = "clippingImages/\(docName)_mid.png"
-                                
-                                let newClipping = Clipping()
-                                newClipping.id = docName
-                                newClipping.sourceId = source!.id
-                                newClipping.isHead = isHead
-                                newClipping.isBody = isBody
-                                newClipping.isAnimal = isAnimal
-                                newClipping.isMan = isMan
-                                newClipping.isWoman = isWoman
-                                newClipping.isTrans = isTrans
-                                newClipping.isWhite = isWhite
-                                newClipping.isBlack = isBlack
-                                newClipping.isLatino = isLatino
-                                newClipping.isAsian = isAsian
-                                newClipping.isIndian = isIndian
-                                newClipping.isNative = isNative
-                                newClipping.isBlackAndWhite = isBW
-                                newClipping.name = name
-                                newClipping.tags = tags
-                                newClipping.imageUrl = imagePath
-                                newClipping.imageUrlMid = midsizedPath
-                                newClipping.imageUrlThumb = thumbPath
-                                newClipping.height = Double(heightString) ?? 0.0
-                                newClipping.width = Double(widthString) ?? 0.0
-                                if (isHead && !isBody) {
-                                    newClipping.headHeight = Double(headHeightString)
-                                    newClipping.headWidth = Double(headWidthString)
-                                    newClipping.lookingDirection = lookingDirectionString
-                                }
-                                
-                                let newClippingData = try? Firestore.Encoder().encode(newClipping)
-                                
-                                // TODO: prevent addition of duplicate clippings
-                                
-                                // add info to database
-                                docRef.updateData(["clippings": FieldValue.arrayUnion([newClippingData])])
-                                
-                                // upload images
-                                let imageHelperFunctions = ImageHelperFunctions()
-                                imageHelperFunctions.uploadClippingImages(image: image!, docName: docName)
-                                
-                                DispatchQueue.main.async {
-                                    isAdded = true
-                                    isSubmitting = false
-                                    lastSourceId = source?.id ?? ""
-                                    activeAlert = .success
-                                }
-                            }
-                        } else {
+                        guard let documentSnapshot = documentSnapshot, documentSnapshot.exists else {
                             print("Document does not exist")
                             DispatchQueue.main.async {
                                 isSubmitting = false
                                 errorMessage = "The source document was not found. Please try again."
                                 activeAlert = .uploadError
                             }
+                            return
+                        }
+                        
+                        // verified that Source document can be accessed
+                        // now create Clipping entry
+                        
+                        let docName = UUID().uuidString
+                        let imagePath = "clippingImages/\(docName).png"
+                        let thumbPath = "clippingImages/\(docName)_thumb.png"
+                        let midsizedPath = "clippingImages/\(docName)_mid.png"
+                        
+                        let newClipping = Clipping()
+                        newClipping.id = docName
+                        newClipping.sourceId = source.id
+                        newClipping.isHead = isHead
+                        newClipping.isBody = isBody
+                        newClipping.isAnimal = isAnimal
+                        newClipping.isMan = isMan
+                        newClipping.isWoman = isWoman
+                        newClipping.isTrans = isTrans
+                        newClipping.isWhite = isWhite
+                        newClipping.isBlack = isBlack
+                        newClipping.isLatino = isLatino
+                        newClipping.isAsian = isAsian
+                        newClipping.isIndian = isIndian
+                        newClipping.isNative = isNative
+                        newClipping.isBlackAndWhite = isBW
+                        newClipping.name = nameToSave
+                        newClipping.tags = tagsToSave
+                        newClipping.imageUrl = imagePath
+                        newClipping.imageUrlMid = midsizedPath
+                        newClipping.imageUrlThumb = thumbPath
+                        newClipping.height = Double(heightString) ?? 0.0
+                        newClipping.width = Double(widthString) ?? 0.0
+                        if shouldUpdateHeadName {
+                            newClipping.headHeight = Double(headHeightString)
+                            newClipping.headWidth = Double(headWidthString)
+                            newClipping.lookingDirection = lookingDirectionString
+                        }
+                        
+                        guard let newClippingData = try? Firestore.Encoder().encode(newClipping) else {
+                            DispatchQueue.main.async {
+                                isSubmitting = false
+                                errorMessage = "Could not encode clipping data. Please try again."
+                                activeAlert = .uploadError
+                            }
+                            return
+                        }
+                        
+                        // Upload images first so we never save a clipping with missing Storage files
+                        let imageHelperFunctions = ImageHelperFunctions()
+                        imageHelperFunctions.uploadClippingImages(image: image, docName: docName) { uploadResult in
+                            switch uploadResult {
+                            case .failure(let uploadError):
+                                DispatchQueue.main.async {
+                                    isSubmitting = false
+                                    errorMessage = uploadError.localizedDescription
+                                    activeAlert = .uploadError
+                                }
+                                
+                            case .success:
+                                docRef.updateData(["clippings": FieldValue.arrayUnion([newClippingData])]) { writeError in
+                                    DispatchQueue.main.async {
+                                        if let writeError {
+                                            isSubmitting = false
+                                            errorMessage = "Images uploaded, but saving failed: \(writeError.localizedDescription)"
+                                            activeAlert = .uploadError
+                                            return
+                                        }
+                                        
+                                        self.updateCoreDataAfterClippingSave(
+                                            tags: tagsToSave,
+                                            name: nameToSave,
+                                            shouldUpdateHeadName: shouldUpdateHeadName
+                                        )
+                                        
+                                        isAdded = true
+                                        isSubmitting = false
+                                        lastSourceId = source.id
+                                        activeAlert = .success
+                                    }
+                                }
+                            }
                         }
                     } // docRef.getDocument
-                    
-                    // MARK: -
-                    // now add/update ClippingTag information to CoreData
-                    for tag in tags {
-                        let fetchRequest: NSFetchRequest<ClippingTag> = ClippingTag.fetchRequest()
-                        fetchRequest.predicate = NSPredicate(format: "tagString = %@", tag)
-                        
-                        do {
-                            let matchingTags = try managedObjectContext.fetch(fetchRequest)
-                            if let existingTag = matchingTags.first {
-                                existingTag.count += 1
-                            } else {
-                                let newTag = ClippingTag(context: managedObjectContext)
-                                newTag.tagString = tag
-                                newTag.count = 1
-                                print("adding new '\(tag)' ClippingTag entity to CoreData")
-                            }
-                        } catch {
-                            print("Failed to fetch tag from CoreData: \(error)")
-                        }
-                    }
-                    
-                    // similarly check to see if name is
-                    if (isHead && !isBody) {
-                        let fetchRequest: NSFetchRequest<HeadName> = HeadName.fetchRequest()
-                        fetchRequest.predicate = NSPredicate(format: "name = %@", name)
-                        
-                        do {
-                            let matchingHead = try managedObjectContext.fetch(fetchRequest)
-                            if let existingHead = matchingHead.first {
-                                existingHead.count += 1
-                            } else {
-                                let newHead = HeadName(context: managedObjectContext)
-                                newHead.name = name
-                                newHead.count = 1
-                                print("adding new '\(name)' HeadName entity to CoreDate")
-                            }
-                        } catch {
-                            print("Failed to getch head name from CoreData: \(error)")
-                        }
-                    }
-                    
-                    do {
-                        try managedObjectContext.save()
-                    } catch {
-                        print("Failed to save context: \(error)")
-                    }
                     
                 } label: {
                     if isSubmitting {
@@ -932,6 +914,52 @@ struct AddClippingView: View {
         
         
     } // body View
+    
+    private func updateCoreDataAfterClippingSave(tags: [String], name: String, shouldUpdateHeadName: Bool) {
+        for tag in tags {
+            let fetchRequest: NSFetchRequest<ClippingTag> = ClippingTag.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "tagString = %@", tag)
+            
+            do {
+                let matchingTags = try managedObjectContext.fetch(fetchRequest)
+                if let existingTag = matchingTags.first {
+                    existingTag.count += 1
+                } else {
+                    let newTag = ClippingTag(context: managedObjectContext)
+                    newTag.tagString = tag
+                    newTag.count = 1
+                    print("adding new '\(tag)' ClippingTag entity to CoreData")
+                }
+            } catch {
+                print("Failed to fetch tag from CoreData: \(error)")
+            }
+        }
+        
+        if shouldUpdateHeadName {
+            let fetchRequest: NSFetchRequest<HeadName> = HeadName.fetchRequest()
+            fetchRequest.predicate = NSPredicate(format: "name = %@", name)
+            
+            do {
+                let matchingHead = try managedObjectContext.fetch(fetchRequest)
+                if let existingHead = matchingHead.first {
+                    existingHead.count += 1
+                } else {
+                    let newHead = HeadName(context: managedObjectContext)
+                    newHead.name = name
+                    newHead.count = 1
+                    print("adding new '\(name)' HeadName entity to CoreData")
+                }
+            } catch {
+                print("Failed to fetch head name from CoreData: \(error)")
+            }
+        }
+        
+        do {
+            try managedObjectContext.save()
+        } catch {
+            print("Failed to save context: \(error)")
+        }
+    }
     
     func handleMeasurementError() {
         errorMessage = "Invalid measurement. Please enter a valid number."

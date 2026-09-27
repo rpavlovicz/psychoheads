@@ -312,72 +312,93 @@ struct AddSourceView: View {
                                     errorMessage = "Could not save to database: \(error.localizedDescription)"
                                     activeAlert = .uploadError
                                 }
-                            } else {
-                                // if no matches found, make new db entry
-                                if querySnapshot!.documents.count == 0 {
-                                    let docName = UUID().uuidString
-                                    let imagePath = "sourceImages/\(docName).png"
-                                    let thumbPath = "sourceImages/\(docName)_thumb.png"
-                                    let midsizedPath = "sourceImages/\(docName)_mid.png"
-                                    print("docName = \(docName)")
-                                    let newDoc = sourcesCollection.document(docName)
-                                    newDoc.setData(["sourcetype": sourceType,
-                                                    "title": sourceTitle,
-                                                    "year": sourceYear,
-                                                    "copies": nCopies,
-                                                    "timeadded" : constants.now,
-                                                    "imagelocation" : imagePath,
-                                                    "midsizedlocation" : midsizedPath,
-                                                    "thumblocation": thumbPath])
-                                    
-                                    if !sourceMonth.isEmpty {
-                                        newDoc.updateData(["month": sourceMonth])
-                                    }
-                                    if !sourceDay.isEmpty {
-                                        newDoc.updateData(["day": sourceDay])
-                                    }
-                                    if !sourceIssue.isEmpty {
-                                        newDoc.updateData(["issue": sourceIssue])
-                                    }
-                                    
-                                    // upload images
-                                    let imageHelperFunctions = ImageHelperFunctions()
-                                    imageHelperFunctions.uploadSourceImages(image: image!, docName: docName)
-                                    
-                                    isAdded = true
-                                    sourceModel.updateSources()
-                                    activeAlert = .success
+                                return
+                            }
+                            
+                            guard let querySnapshot = querySnapshot else {
+                                DispatchQueue.main.async {
                                     isSubmitting = false
-                                    
-                                } else {
-                                    
-                                    //
+                                    errorMessage = "Could not check for duplicates. Please try again."
+                                    activeAlert = .uploadError
+                                }
+                                return
+                            }
+                            
+                            // if matches found, treat as duplicate
+                            if querySnapshot.documents.count > 0 {
+                                DispatchQueue.main.async {
                                     activeAlert = .duplicate
                                     isSubmitting = false
-                                    
-                                } // end of adding database items
-                                
-                                //MARK: - update CoreData
-                                let fetchRequest: NSFetchRequest<SourceName> = SourceName.fetchRequest()
-                                fetchRequest.predicate = NSPredicate(format: "nameString == %@", sourceTitle)
-                                do {
-                                    let matchingSourceNames = try self.managedObjectContext.fetch(fetchRequest)
-                                    if let existingSourceName = matchingSourceNames.first {
-                                        // If the source name already exists, increment its count.
-                                        existingSourceName.count += 1
-                                    } else {
-                                        // If the source name does not exist, create a new SourceName entity.
-                                        let newSourceName = SourceName(context: self.managedObjectContext)
-                                        newSourceName.nameString = sourceTitle
-                                        newSourceName.count = 1
+                                }
+                                return
+                            }
+                            
+                            guard let image = image else {
+                                DispatchQueue.main.async {
+                                    isSubmitting = false
+                                    errorMessage = "No image available to upload."
+                                    activeAlert = .uploadError
+                                }
+                                return
+                            }
+                            
+                            let docName = UUID().uuidString
+                            let imagePath = "sourceImages/\(docName).png"
+                            let thumbPath = "sourceImages/\(docName)_thumb.png"
+                            let midsizedPath = "sourceImages/\(docName)_mid.png"
+                            print("docName = \(docName)")
+                            
+                            var data: [String: Any] = [
+                                "sourcetype": sourceType,
+                                "title": sourceTitle,
+                                "year": sourceYear,
+                                "copies": nCopies,
+                                "timeadded": constants.now,
+                                "imagelocation": imagePath,
+                                "midsizedlocation": midsizedPath,
+                                "thumblocation": thumbPath
+                            ]
+                            if !sourceMonth.isEmpty {
+                                data["month"] = sourceMonth
+                            }
+                            if !sourceDay.isEmpty {
+                                data["day"] = sourceDay
+                            }
+                            if !sourceIssue.isEmpty {
+                                data["issue"] = sourceIssue
+                            }
+                            
+                            // Upload images first so we never save a source with missing Storage files
+                            let imageHelperFunctions = ImageHelperFunctions()
+                            imageHelperFunctions.uploadSourceImages(image: image, docName: docName) { uploadResult in
+                                switch uploadResult {
+                                case .failure(let uploadError):
+                                    DispatchQueue.main.async {
+                                        isSubmitting = false
+                                        errorMessage = uploadError.localizedDescription
+                                        activeAlert = .uploadError
                                     }
                                     
-                                    try self.managedObjectContext.save()
-                                } catch {
-                                    // handle the Core Data error
-                                    print(error)
+                                case .success:
+                                    let newDoc = sourcesCollection.document(docName)
+                                    newDoc.setData(data) { writeError in
+                                        DispatchQueue.main.async {
+                                            if let writeError {
+                                                isSubmitting = false
+                                                errorMessage = "Images uploaded, but saving failed: \(writeError.localizedDescription)"
+                                                activeAlert = .uploadError
+                                                return
+                                            }
+                                            
+                                            self.updateCoreDataAfterSourceSave(title: sourceTitle)
+                                            
+                                            isAdded = true
+                                            sourceModel.updateSources()
+                                            activeAlert = .success
+                                            isSubmitting = false
+                                        }
+                                    }
                                 }
-                                
                             }
                         } // getDocuments query
                         
@@ -446,6 +467,24 @@ struct AddSourceView: View {
 //        sourceIssue = UserDefaults.standard.string(forKey: "sourceIssue") ?? ""
 //        nCopies = UserDefaults.standard.integer(forKey: "nCopies")
 //    }
+    
+    private func updateCoreDataAfterSourceSave(title: String) {
+        let fetchRequest: NSFetchRequest<SourceName> = SourceName.fetchRequest()
+        fetchRequest.predicate = NSPredicate(format: "nameString == %@", title)
+        do {
+            let matchingSourceNames = try managedObjectContext.fetch(fetchRequest)
+            if let existingSourceName = matchingSourceNames.first {
+                existingSourceName.count += 1
+            } else {
+                let newSourceName = SourceName(context: managedObjectContext)
+                newSourceName.nameString = title
+                newSourceName.count = 1
+            }
+            try managedObjectContext.save()
+        } catch {
+            print(error)
+        }
+    }
     
     private func resetData() {
         sourceType = ""

@@ -47,67 +47,129 @@ struct ImageHelperFunctions {
         return newImage
     }
     
-    func uploadSourceImages(image: UIImage, docName: String) {
+    enum ImageUploadError: LocalizedError {
+        case pngConversionFailed(path: String)
+        case resizeFailed(kind: String)
+        case storageFailed(path: String, underlying: Error?)
         
+        var errorDescription: String? {
+            switch self {
+            case .pngConversionFailed(let path):
+                return "Could not convert image to PNG for \(path)."
+            case .resizeFailed(let kind):
+                return "Could not create \(kind) image."
+            case .storageFailed(let path, let underlying):
+                if let underlying {
+                    return "Failed to upload \(path): \(underlying.localizedDescription)"
+                }
+                return "Failed to upload \(path)."
+            }
+        }
+    }
+    
+    func uploadSourceImages(image: UIImage, docName: String, completion: @escaping (Result<Void, Error>) -> Void) {
         let imagePath = "sourceImages/\(docName).png"
         let thumbPath = "sourceImages/\(docName)_thumb.png"
         let midsizedPath = "sourceImages/\(docName)_mid.png"
-        
-        // Original image upload
-        uploadImage(image: image, imagePath: imagePath)
-        
-        // Thumbnail image upload
-        let downscaleSize = CGSize(width: 150.0, height: 150.0)
-        if let scaledImage = self.resizeImage(image: image, targetSize: downscaleSize) {
-            uploadImage(image: scaledImage, imagePath: thumbPath)
-        }
-        
-        // Midsize image upload
-        let downscaleMid = CGSize(width: 500.0, height: 500.0)
-        if let scaledImageMid = self.resizeImage(image: image, targetSize: downscaleMid) {
-            uploadImage(image: scaledImageMid, imagePath: midsizedPath)
-        }
+        uploadImageSet(
+            image: image,
+            fullPath: imagePath,
+            thumbPath: thumbPath,
+            midPath: midsizedPath,
+            completion: completion
+        )
     }
     
-    func uploadClippingImages(image: UIImage, docName: String) {
-        
+    func uploadClippingImages(image: UIImage, docName: String, completion: @escaping (Result<Void, Error>) -> Void) {
         let imagePath = "clippingImages/\(docName).png"
         let thumbPath = "clippingImages/\(docName)_thumb.png"
         let midsizedPath = "clippingImages/\(docName)_mid.png"
-        
-        // Original image upload
-        uploadImage(image: image, imagePath: imagePath)
-        
-        // Thumbnail image upload
-        let downscaleSize = CGSize(width: 150.0, height: 150.0)
-        if let scaledImage = self.resizeImage(image: image, targetSize: downscaleSize) {
-            uploadImage(image: scaledImage, imagePath: thumbPath)
+        uploadImageSet(
+            image: image,
+            fullPath: imagePath,
+            thumbPath: thumbPath,
+            midPath: midsizedPath,
+            completion: completion
+        )
+    }
+    
+    private func uploadImageSet(
+        image: UIImage,
+        fullPath: String,
+        thumbPath: String,
+        midPath: String,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        guard let thumbImage = resizeImage(image: image, targetSize: CGSize(width: 150.0, height: 150.0)) else {
+            DispatchQueue.main.async {
+                completion(.failure(ImageUploadError.resizeFailed(kind: "thumbnail")))
+            }
+            return
+        }
+        guard let midImage = resizeImage(image: image, targetSize: CGSize(width: 500.0, height: 500.0)) else {
+            DispatchQueue.main.async {
+                completion(.failure(ImageUploadError.resizeFailed(kind: "mid-size")))
+            }
+            return
         }
         
-        // Midsize image upload
-        let downscaleMid = CGSize(width: 500.0, height: 500.0)
-        if let scaledImageMid = self.resizeImage(image: image, targetSize: downscaleMid) {
-            uploadImage(image: scaledImageMid, imagePath: midsizedPath)
+        let uploads: [(UIImage, String)] = [
+            (image, fullPath),
+            (thumbImage, thumbPath),
+            (midImage, midPath)
+        ]
+        
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var firstError: Error?
+        
+        for (uploadImage, path) in uploads {
+            group.enter()
+            self.uploadImage(image: uploadImage, imagePath: path) { result in
+                if case .failure(let error) = result {
+                    lock.lock()
+                    if firstError == nil {
+                        firstError = error
+                    }
+                    lock.unlock()
+                }
+                group.leave()
+            }
+        }
+        
+        group.notify(queue: .main) {
+            if let firstError {
+                completion(.failure(firstError))
+            } else {
+                completion(.success(()))
+            }
         }
     }
     
-    func uploadImage(image: UIImage, imagePath: String) {
-        let storageRef = Storage.storage().reference()
+    /// Uploads a single image to Storage. Retries once on failure.
+    func uploadImage(
+        image: UIImage,
+        imagePath: String,
+        attempt: Int = 0,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        guard let pngData = image.pngData() else {
+            completion(.failure(ImageUploadError.pngConversionFailed(path: imagePath)))
+            return
+        }
         
-        if let pngData = image.pngData() {
-//            let pngSize = Double(pngData.count) / (1024.0 * 1024.0)
-//            print("original png size = \(String(format: "%.2f", pngSize)) MB")
-//            print("original image width x height = \(image!.size.width) x \(image!.size.height)")
-            let fileRef = storageRef.child(imagePath)
-            let uploadTask = fileRef.putData(pngData, metadata: nil) { metadata, error in
-                if error == nil && metadata != nil {
-                    print("Successfully uploaded image to \(imagePath)")
-                } else {
-                    print("Error uploading image to \(imagePath): \(String(describing: error))")
-                }
+        let fileRef = Storage.storage().reference().child(imagePath)
+        fileRef.putData(pngData, metadata: nil) { metadata, error in
+            if error == nil && metadata != nil {
+                print("Successfully uploaded image to \(imagePath)")
+                completion(.success(()))
+            } else if attempt < 1 {
+                print("Retrying upload to \(imagePath) after error: \(String(describing: error))")
+                self.uploadImage(image: image, imagePath: imagePath, attempt: attempt + 1, completion: completion)
+            } else {
+                print("Error uploading image to \(imagePath): \(String(describing: error))")
+                completion(.failure(ImageUploadError.storageFailed(path: imagePath, underlying: error)))
             }
-        } else {
-            print("Error converting image to data for \(imagePath)")
         }
     }
     
