@@ -20,6 +20,8 @@ enum SelectionState: Hashable, Codable {
     
     // Library navigation states
     case library
+    case libraryForTitle(String)
+    case libraryForYear(Int, SourceCoverageFilter)
     case imageCapture
     case sourceView(Source)
     case clippingView(Clipping)

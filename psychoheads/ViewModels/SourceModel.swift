@@ -10,7 +10,7 @@ import FirebaseFirestore
 import FirebaseStorage
 import CoreData
 
-enum SourceCoverageFilter: String, CaseIterable, Identifiable {
+enum SourceCoverageFilter: String, CaseIterable, Identifiable, Codable, Hashable {
     case withClippings
     case all
     case unclippedOnly
@@ -69,6 +69,8 @@ class SourceModel: ObservableObject {
                     s.day = doc["day"] as? String ?? ""
                     s.issue = doc["issue"] as? String ?? ""
                     s.ncopies = doc["copies"] as? Int ?? 0
+                    s.imageUrl = doc["imagelocation"] as? String ?? ""
+                    s.imageUrlMid = doc["midsizedlocation"] as? String ?? ""
                     s.imageUrlThumb = doc["thumblocation"] as? String ?? ""
                     
                     if let timestamp = doc["timeadded"] as? Timestamp {
@@ -171,6 +173,8 @@ class SourceModel: ObservableObject {
                         s.issue = doc["issue"] as? String ?? ""
                         s.ncopies = doc["copies"] as? Int ?? 0
                         s.clippings = doc["clippings"] as? [Clipping] ?? []
+                        s.imageUrl = doc["imagelocation"] as? String ?? ""
+                        s.imageUrlMid = doc["midsizedlocation"] as? String ?? ""
                         s.imageUrlThumb = doc["thumblocation"] as? String ?? ""
                         
                         if let timestamp = doc["timeadded"] as? Timestamp {

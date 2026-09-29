@@ -185,6 +185,16 @@ struct LibrarySourceView: View {
                     Text(source.dateString)
                         .font(.subheadline)
                 }
+                .contentShape(Rectangle())
+                .contextMenu {
+                    Button {
+                        navigationStateManager.selectionPath.append(.edit(source))
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
+                    }
+                } preview: {
+                    SourcePreviewCard(source: source)
+                }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button(action: { isScatterMode.toggle() }) {

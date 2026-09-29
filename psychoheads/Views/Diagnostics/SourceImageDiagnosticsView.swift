@@ -1,21 +1,23 @@
 //
-//  ClippingImageDiagnosticsView.swift
+//  SourceImageDiagnosticsView.swift
 //  psychoheads
 //
 
 import SwiftUI
 import FirebaseStorage
 
-struct ClippingImageDiagnosticRow: Identifiable {
+struct SourceImageDiagnosticRow: Identifiable {
     let id: String
-    let clipping: Clipping
-    let sourceTitle: String
-    let sourceId: String
+    let source: Source
     var hasThumb: Bool?
     var hasMid: Bool?
     var hasFull: Bool?
     var previewImage: UIImage?
     var isScanned: Bool = false
+    
+    var fullPath: String { Self.resolvedPaths(for: source).full }
+    var midPath: String { Self.resolvedPaths(for: source).mid }
+    var thumbPath: String { Self.resolvedPaths(for: source).thumb }
     
     var missingCount: Int {
         guard isScanned else { return 0 }
@@ -29,34 +31,62 @@ struct ClippingImageDiagnosticRow: Identifiable {
     /// Full image is present; thumb and/or mid missing with non-empty target paths.
     var isRegenerable: Bool {
         guard isScanned, hasFull == true else { return false }
-        let thumbPath = clipping.imageUrlThumb.trimmingCharacters(in: .whitespacesAndNewlines)
-        let midPath = clipping.imageUrlMid.trimmingCharacters(in: .whitespacesAndNewlines)
         let needsThumb = hasThumb != true && !thumbPath.isEmpty
         let needsMid = hasMid != true && !midPath.isEmpty
         return needsThumb || needsMid
     }
+    
+    static func resolvedPaths(for source: Source) -> (full: String, mid: String, thumb: String) {
+        let storedThumb = source.imageUrlThumb.trimmingCharacters(in: .whitespacesAndNewlines)
+        let storedMid = source.imageUrlMid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let storedFull = source.imageUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        let thumb: String
+        if !storedThumb.isEmpty {
+            thumb = storedThumb
+        } else {
+            thumb = "sourceImages/\(source.id)_thumb.png"
+        }
+        
+        let mid: String
+        if !storedMid.isEmpty {
+            mid = storedMid
+        } else if storedThumb.contains("_thumb") {
+            mid = storedThumb.replacingOccurrences(of: "_thumb", with: "_mid")
+        } else {
+            mid = "sourceImages/\(source.id)_mid.png"
+        }
+        
+        let full: String
+        if !storedFull.isEmpty {
+            full = storedFull
+        } else if storedThumb.hasSuffix("_thumb.png") {
+            full = String(storedThumb.dropLast("_thumb.png".count)) + ".png"
+        } else if storedThumb.contains("_thumb") {
+            full = storedThumb.replacingOccurrences(of: "_thumb", with: "")
+        } else {
+            full = "sourceImages/\(source.id).png"
+        }
+        
+        return (full, mid, thumb)
+    }
 }
 
-private struct PersistedDiagnosticResult: Codable {
-    let clippingId: String
+private struct PersistedSourceDiagnosticResult: Codable {
+    let sourceId: String
     let hasThumb: Bool
     let hasMid: Bool
     let hasFull: Bool
 }
 
-private struct PersistedDiagnosticsStore: Codable {
-    var results: [String: PersistedDiagnosticResult]
+private struct PersistedSourceDiagnosticsStore: Codable {
+    var results: [String: PersistedSourceDiagnosticResult]
     var lastScanDate: Date?
 }
 
-enum DiagnosticScanMode {
-    case all
-    case incompleteOnly
-}
-
 @MainActor
-final class ClippingImageDiagnosticsViewModel: ObservableObject {
-    @Published var rows: [ClippingImageDiagnosticRow] = []
+final class SourceImageDiagnosticsViewModel: ObservableObject {
+    @Published var rows: [SourceImageDiagnosticRow] = []
     @Published var isScanning = false
     @Published var scannedCount = 0
     @Published var totalCount = 0
@@ -72,7 +102,7 @@ final class ClippingImageDiagnosticsViewModel: ObservableObject {
     
     private static var persistenceURL: URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        return docs.appendingPathComponent("clipping_image_diagnostics.json")
+        return docs.appendingPathComponent("source_image_diagnostics.json")
     }
     
     var isBusy: Bool {
@@ -87,7 +117,7 @@ final class ClippingImageDiagnosticsViewModel: ObservableObject {
         rows.filter { !$0.isScanned || $0.isIncomplete }.count
     }
     
-    var displayedRows: [ClippingImageDiagnosticRow] {
+    var displayedRows: [SourceImageDiagnosticRow] {
         let filtered = showIncompleteOnly
             ? rows.filter { $0.isIncomplete || !$0.isScanned }
             : rows
@@ -98,40 +128,32 @@ final class ClippingImageDiagnosticsViewModel: ObservableObject {
             if lhs.isScanned != rhs.isScanned {
                 return !lhs.isScanned && rhs.isScanned
             }
-            let titleCompare = lhs.sourceTitle.localizedCaseInsensitiveCompare(rhs.sourceTitle)
+            let titleCompare = lhs.source.title.localizedCaseInsensitiveCompare(rhs.source.title)
             if titleCompare != .orderedSame {
                 return titleCompare == .orderedAscending
             }
-            let nameCompare = lhs.clipping.name.localizedCaseInsensitiveCompare(rhs.clipping.name)
-            if nameCompare != .orderedSame {
-                return nameCompare == .orderedAscending
+            let dateCompare = lhs.source.dateString.localizedCaseInsensitiveCompare(rhs.source.dateString)
+            if dateCompare != .orderedSame {
+                return dateCompare == .orderedAscending
             }
             return lhs.id < rhs.id
         }
     }
     
-    /// Builds rows from current sources and restores any saved scan statuses.
     func loadRows(from sourceModel: SourceModel) {
         let store = Self.loadStore()
         lastScanDate = store.lastScanDate
         
-        var built: [ClippingImageDiagnosticRow] = []
+        var built: [SourceImageDiagnosticRow] = []
         for source in sourceModel.sources {
-            for clipping in source.clippings {
-                var row = ClippingImageDiagnosticRow(
-                    id: clipping.id,
-                    clipping: clipping,
-                    sourceTitle: source.title,
-                    sourceId: source.id
-                )
-                if let saved = store.results[clipping.id] {
-                    row.hasThumb = saved.hasThumb
-                    row.hasMid = saved.hasMid
-                    row.hasFull = saved.hasFull
-                    row.isScanned = true
-                }
-                built.append(row)
+            var row = SourceImageDiagnosticRow(id: source.id, source: source)
+            if let saved = store.results[source.id] {
+                row.hasThumb = saved.hasThumb
+                row.hasMid = saved.hasMid
+                row.hasFull = saved.hasFull
+                row.isScanned = true
             }
+            built.append(row)
         }
         rows = built
         totalCount = built.count
@@ -142,11 +164,10 @@ final class ClippingImageDiagnosticsViewModel: ObservableObject {
         guard !isBusy else { return }
         scanTask?.cancel()
         
-        // Refresh clipping list from model while keeping persisted statuses
         loadRows(from: sourceModel)
         guard !rows.isEmpty else { return }
         
-        let targets: [ClippingImageDiagnosticRow]
+        let targets: [SourceImageDiagnosticRow]
         switch mode {
         case .all:
             targets = rows
@@ -176,7 +197,7 @@ final class ClippingImageDiagnosticsViewModel: ObservableObject {
         scannedCount = rows.filter(\.isScanned).count
     }
     
-    func repairRow(_ row: ClippingImageDiagnosticRow) {
+    func repairRow(_ row: SourceImageDiagnosticRow) {
         guard !isBusy, row.isRegenerable else { return }
         repairingRowId = row.id
         repairTask = Task {
@@ -191,9 +212,9 @@ final class ClippingImageDiagnosticsViewModel: ObservableObject {
                         updated.hasMid = true
                     }
                     updated.previewImage = await Self.loadPreview(
-                        thumbPath: row.clipping.imageUrlThumb,
-                        midPath: row.clipping.imageUrlMid,
-                        fullPath: row.clipping.imageUrl
+                        thumbPath: row.thumbPath,
+                        midPath: row.midPath,
+                        fullPath: row.fullPath
                     )
                     rows[index] = updated
                     persistResults()
@@ -207,38 +228,38 @@ final class ClippingImageDiagnosticsViewModel: ObservableObject {
     }
     
     private func persistResults() {
-        var results: [String: PersistedDiagnosticResult] = [:]
+        var results: [String: PersistedSourceDiagnosticResult] = [:]
         for row in rows where row.isScanned {
-            results[row.id] = PersistedDiagnosticResult(
-                clippingId: row.id,
+            results[row.id] = PersistedSourceDiagnosticResult(
+                sourceId: row.id,
                 hasThumb: row.hasThumb == true,
                 hasMid: row.hasMid == true,
                 hasFull: row.hasFull == true
             )
         }
-        let store = PersistedDiagnosticsStore(results: results, lastScanDate: lastScanDate)
+        let store = PersistedSourceDiagnosticsStore(results: results, lastScanDate: lastScanDate)
         do {
             let data = try JSONEncoder().encode(store)
             try data.write(to: Self.persistenceURL, options: [.atomic])
         } catch {
-            print("Failed to persist diagnostics: \(error)")
+            print("Failed to persist source diagnostics: \(error)")
         }
     }
     
-    private static func loadStore() -> PersistedDiagnosticsStore {
+    private static func loadStore() -> PersistedSourceDiagnosticsStore {
         let url = persistenceURL
         guard let data = try? Data(contentsOf: url),
-              let store = try? JSONDecoder().decode(PersistedDiagnosticsStore.self, from: data) else {
-            return PersistedDiagnosticsStore(results: [:], lastScanDate: nil)
+              let store = try? JSONDecoder().decode(PersistedSourceDiagnosticsStore.self, from: data) else {
+            return PersistedSourceDiagnosticsStore(results: [:], lastScanDate: nil)
         }
         return store
     }
     
-    private func scanAll(_ snapshot: [ClippingImageDiagnosticRow]) async {
+    private func scanAll(_ snapshot: [SourceImageDiagnosticRow]) async {
         let concurrency = 6
         var index = 0
         
-        await withTaskGroup(of: (Int, ClippingImageDiagnosticRow).self) { group in
+        await withTaskGroup(of: (Int, SourceImageDiagnosticRow).self) { group in
             func enqueueNext() {
                 guard index < snapshot.count else { return }
                 let currentIndex = index
@@ -266,30 +287,30 @@ final class ClippingImageDiagnosticsViewModel: ObservableObject {
         }
     }
     
-    private nonisolated static func repairDerivatives(for row: ClippingImageDiagnosticRow) async throws {
-        let fullPath = row.clipping.imageUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+    private nonisolated static func repairDerivatives(for row: SourceImageDiagnosticRow) async throws {
+        let paths = SourceImageDiagnosticRow.resolvedPaths(for: row.source)
+        let fullPath = paths.full
         guard !fullPath.isEmpty else {
             throw ImageHelperFunctions.ImageUploadError.storageFailed(
                 path: "full",
-                underlying: NSError(domain: "ClippingRepair", code: 1, userInfo: [
+                underlying: NSError(domain: "SourceRepair", code: 1, userInfo: [
                     NSLocalizedDescriptionKey: "Full image path is empty."
                 ])
             )
         }
         
-        // Full originals can be larger than preview downloads
         guard let fullImage = await downloadImage(path: fullPath, maxSize: 40 * 1024 * 1024) else {
             throw ImageHelperFunctions.ImageUploadError.storageFailed(
                 path: fullPath,
-                underlying: NSError(domain: "ClippingRepair", code: 2, userInfo: [
+                underlying: NSError(domain: "SourceRepair", code: 2, userInfo: [
                     NSLocalizedDescriptionKey: "Could not download the full-size image."
                 ])
             )
         }
         
         let helper = ImageHelperFunctions()
-        let thumbPath = row.clipping.imageUrlThumb.trimmingCharacters(in: .whitespacesAndNewlines)
-        let midPath = row.clipping.imageUrlMid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let thumbPath = paths.thumb
+        let midPath = paths.mid
         let needsThumb = row.hasThumb != true && !thumbPath.isEmpty
         let needsMid = row.hasMid != true && !midPath.isEmpty
         
@@ -343,24 +364,22 @@ final class ClippingImageDiagnosticsViewModel: ObservableObject {
         }
     }
     
-    private nonisolated static func scanRow(_ row: ClippingImageDiagnosticRow) async -> ClippingImageDiagnosticRow {
+    private nonisolated static func scanRow(_ row: SourceImageDiagnosticRow) async -> SourceImageDiagnosticRow {
         var updated = row
-        let thumbPath = row.clipping.imageUrlThumb
-        let midPath = row.clipping.imageUrlMid
-        let fullPath = row.clipping.imageUrl
+        let paths = SourceImageDiagnosticRow.resolvedPaths(for: row.source)
         
-        async let thumbPresent = storageObjectPresent(at: thumbPath)
-        async let midPresent = storageObjectPresent(at: midPath)
-        async let fullPresent = storageObjectPresent(at: fullPath)
+        async let thumbPresent = storageObjectPresent(at: paths.thumb)
+        async let midPresent = storageObjectPresent(at: paths.mid)
+        async let fullPresent = storageObjectPresent(at: paths.full)
         
         updated.hasThumb = await thumbPresent
         updated.hasMid = await midPresent
         updated.hasFull = await fullPresent
         updated.isScanned = true
         updated.previewImage = await loadPreview(
-            thumbPath: thumbPath,
-            midPath: midPath,
-            fullPath: fullPath
+            thumbPath: paths.thumb,
+            midPath: paths.mid,
+            fullPath: paths.full
         )
         return updated
     }
@@ -386,7 +405,7 @@ final class ClippingImageDiagnosticsViewModel: ObservableObject {
         midPath: String,
         fullPath: String
     ) async -> UIImage? {
-        let placeholder = UIImage(named: "clipping_thumb") ?? UIImage(named: "broken_image_link")
+        let placeholder = UIImage(named: "source_thumb") ?? UIImage(named: "broken_image_link")
         let candidates = [thumbPath, midPath, fullPath]
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -416,12 +435,12 @@ final class ClippingImageDiagnosticsViewModel: ObservableObject {
     }
 }
 
-struct ClippingImageDiagnosticsView: View {
+struct SourceImageDiagnosticsView: View {
     @EnvironmentObject var sourceModel: SourceModel
     @EnvironmentObject var navigationStateManager: NavigationStateManager
-    @StateObject private var viewModel = ClippingImageDiagnosticsViewModel()
+    @StateObject private var viewModel = SourceImageDiagnosticsViewModel()
     
-    private let placeholder = UIImage(named: "clipping_thumb")
+    private let placeholder = UIImage(named: "source_thumb")
         ?? UIImage(named: "broken_image_link")
         ?? UIImage()
     
@@ -431,17 +450,17 @@ struct ClippingImageDiagnosticsView: View {
             Divider()
             if viewModel.rows.isEmpty && !viewModel.isScanning {
                 ContentUnavailableView(
-                    "No clippings loaded",
-                    systemImage: "photo.on.rectangle.angled",
+                    "No sources loaded",
+                    systemImage: "books.vertical",
                     description: Text("Load your library, then run a scan.")
                 )
             } else if viewModel.displayedRows.isEmpty && viewModel.hasPersistedOrScannedResults {
                 ContentUnavailableView(
-                    viewModel.showIncompleteOnly ? "No incomplete clippings" : "No results",
+                    viewModel.showIncompleteOnly ? "No incomplete sources" : "No results",
                     systemImage: "checkmark.seal",
                     description: Text(
                         viewModel.showIncompleteOnly
-                        ? "All scanned clippings have thumb, mid, and full images."
+                        ? "All scanned sources have thumb, mid, and full images."
                         : "Nothing to show."
                     )
                 )
@@ -452,7 +471,6 @@ struct ClippingImageDiagnosticsView: View {
                 .listStyle(.plain)
             }
         }
-        .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             if viewModel.rows.isEmpty {
                 viewModel.loadRows(from: sourceModel)
@@ -555,10 +573,10 @@ struct ClippingImageDiagnosticsView: View {
         }
     }
     
-    private func diagnosticRow(_ row: ClippingImageDiagnosticRow) -> some View {
+    private func diagnosticRow(_ row: SourceImageDiagnosticRow) -> some View {
         HStack(spacing: 10) {
             Button {
-                navigateToSource(for: row)
+                navigationStateManager.selectionPath.append(.sourceView(row.source))
             } label: {
                 HStack(spacing: 12) {
                     Image(uiImage: row.previewImage ?? placeholder)
@@ -573,11 +591,11 @@ struct ClippingImageDiagnosticsView: View {
                         )
                     
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(row.clipping.name.isEmpty ? "(unnamed)" : row.clipping.name)
+                        Text(row.source.title.isEmpty ? "(untitled)" : row.source.title)
                             .font(.subheadline.weight(.semibold))
                             .foregroundColor(.primary)
                             .lineLimit(1)
-                        Text(row.sourceTitle.isEmpty ? "Unknown source" : row.sourceTitle)
+                        Text(row.source.dateString.isEmpty ? "No date" : row.source.dateString)
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .lineLimit(1)
@@ -635,12 +653,5 @@ struct ClippingImageDiagnosticsView: View {
     private func statusColor(value: Bool?, scanned: Bool) -> Color {
         guard scanned, let value else { return .secondary }
         return value ? .green : .red
-    }
-    
-    private func navigateToSource(for row: ClippingImageDiagnosticRow) {
-        guard let source = sourceModel.sources.first(where: { $0.id == row.sourceId }) else {
-            return
-        }
-        navigationStateManager.selectionPath.append(.sourceView(source))
     }
 }

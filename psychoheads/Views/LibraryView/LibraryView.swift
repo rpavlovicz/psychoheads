@@ -5,16 +5,13 @@
 //  Created by Ryan Pavlovicz on 6/25/25.
 //
 
-
-//
-//  LibraryView.swift
-//  psychoheads
-//
-//  Created by Ryan Pavlovicz on 3/24/23.
-//
-
 import SwiftUI
 import FirebaseFirestore
+
+enum LibraryLayoutMode: String {
+    case list
+    case magazine
+}
 
 struct LibraryView: View {
     enum Field: Hashable {
@@ -27,6 +24,7 @@ struct LibraryView: View {
     @EnvironmentObject var navigationStateManager: NavigationStateManager
 
     @AppStorage("isThumbnailMode") private var isThumbnailMode: Bool = false
+    @AppStorage("libraryLayoutMode") private var libraryLayoutModeRaw: String = LibraryLayoutMode.list.rawValue
     
     @State private var showAlert = false
     @State private var sourceToDelete: Source?
@@ -41,22 +39,66 @@ struct LibraryView: View {
     /// `false` = Date newest-first / Title A→Z; `true` = Date oldest-first / Title Z→A
     @State private var isSortReversed: Bool = false
     @State private var sourceCoverageFilter: SourceCoverageFilter = .withClippings
+    /// When set, match this title exactly (case-insensitive) instead of contains-search.
+    private let exactTitleFilter: String?
+    /// When set, only show sources from this publication year.
+    private let yearFilter: Int?
+    /// Session-only layout override (e.g. report → title opens in magazine without changing AppStorage).
+    @State private var sessionLayoutMode: LibraryLayoutMode?
     
-    // Grid layout properties
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Environment(\.verticalSizeClass) private var verticalSizeClass
-    @State private var isLandscape: Bool = false
-    
-    var isIPad: Bool {
-        return UIDevice.current.userInterfaceIdiom == .pad
+    private var libraryLayoutMode: LibraryLayoutMode {
+        get { LibraryLayoutMode(rawValue: libraryLayoutModeRaw) ?? .list }
+        nonmutating set { libraryLayoutModeRaw = newValue.rawValue }
     }
     
-    var shouldUseGrid: Bool {
-        return isIPad && isLandscape
+    private var effectiveLayoutMode: LibraryLayoutMode {
+        sessionLayoutMode ?? libraryLayoutMode
+    }
+    
+    private var isTitleScoped: Bool {
+        exactTitleFilter != nil
+    }
+    
+    private var isYearScoped: Bool {
+        yearFilter != nil
+    }
+    
+    private var searchFieldPrompt: String {
+        isTitleScoped ? "Search date or issue" : "Search"
+    }
+    
+    private var isIPad: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
+    
+    private var magazineColumns: [GridItem] {
+        let minimum: CGFloat = isIPad ? 140 : 110
+        return [GridItem(.adaptive(minimum: minimum), spacing: 12)]
+    }
+    
+    init(
+        sourceModel: SourceModel,
+        initialSearchText: String = "",
+        initialCoverageFilter: SourceCoverageFilter = .withClippings,
+        exactTitleFilter: String? = nil,
+        yearFilter: Int? = nil,
+        startInMagazineRack: Bool = false
+    ) {
+        self.sourceModel = sourceModel
+        self.exactTitleFilter = exactTitleFilter
+        self.yearFilter = yearFilter
+        _searchText = State(initialValue: initialSearchText)
+        _sourceCoverageFilter = State(initialValue: initialCoverageFilter)
+        _sessionLayoutMode = State(initialValue: startInMagazineRack ? .magazine : nil)
+    }
+    
+    private var yearScopedSources: [Source] {
+        sourceModel.sources.filter { matchesYearFilter($0) }
     }
     
     var sourceTitleSuggestions: [String] {
-        let uniqueTitles = Array(Set(sourceModel.sources.map { $0.title }.filter { !$0.isEmpty }))
+        let pool = isYearScoped ? yearScopedSources : sourceModel.sources
+        let uniqueTitles = Array(Set(pool.map { $0.title }.filter { !$0.isEmpty }))
         let filtered = uniqueTitles.filter { title in
             searchText.isEmpty || title.lowercased().contains(searchText.lowercased())
         }
@@ -65,7 +107,7 @@ struct LibraryView: View {
     
     private var titleFilteredSources: [Source] {
         sourceModel.sources.filter { source in
-            searchText.isEmpty || source.title.lowercased().contains(searchText.lowercased())
+            matchesYearFilter(source) && matchesTitleFilter(source)
         }
     }
     
@@ -75,101 +117,143 @@ struct LibraryView: View {
     
     var filteredSources: [Source] {
         sourceModel.sources(for: sourceCoverageFilter).filter { source in
-            searchText.isEmpty || source.title.lowercased().contains(searchText.lowercased())
+            matchesYearFilter(source) && matchesTitleFilter(source) && matchesSecondarySearch(source)
         }
         .sorted { lhs, rhs in
             SourcePublicationSortKey.shouldPrecede(lhs, rhs, mode: sourceSortMode, isReversed: isSortReversed)
         }
     }
     
-    // Grid layout for iPad landscape
-    var gridLayout: some View {
-        ScrollView {
-            LazyVGrid(columns: [
-                GridItem(.flexible(), spacing: 16),
-                GridItem(.flexible(), spacing: 16)
-            ], spacing: 16) {
-                ForEach(filteredSources) { source in
-                    NavigationLink(value: SelectionState.sourceView(source)) {
-                        SourceCardView(source: source)
-                            .environmentObject(source)
-                            .frame(maxWidth: .infinity)
+    private func matchesYearFilter(_ source: Source) -> Bool {
+        guard let yearFilter else { return true }
+        let year = Int(source.year.trimmingCharacters(in: .whitespacesAndNewlines))
+        return year == yearFilter
+    }
+    
+    private func matchesTitleFilter(_ source: Source) -> Bool {
+        if let exactTitleFilter {
+            return source.title.caseInsensitiveCompare(exactTitleFilter) == .orderedSame
+        }
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return true }
+        
+        // If the query exactly matches a known title (e.g. autocomplete "Vanity Fair"),
+        // require an exact title match so "Vanity Fair Italia" is not included.
+        let titlePool = isYearScoped ? yearScopedSources : sourceModel.sources
+        let uniqueTitles = Set(titlePool.map(\.title).filter { !$0.isEmpty })
+        if uniqueTitles.contains(where: { $0.caseInsensitiveCompare(query) == .orderedSame }) {
+            return source.title.caseInsensitiveCompare(query) == .orderedSame
+        }
+        
+        return source.title.lowercased().contains(query.lowercased())
+    }
+    
+    /// When title-scoped, search filters date string and issue within that title pool.
+    private func matchesSecondarySearch(_ source: Source) -> Bool {
+        guard isTitleScoped else { return true }
+        guard !searchText.isEmpty else { return true }
+        let query = searchText.lowercased()
+        if source.dateString.lowercased().contains(query) {
+            return true
+        }
+        if let issue = source.issue, issue.lowercased().contains(query) {
+            return true
+        }
+        return false
+    }
+    
+    private func toggleLayoutMode() {
+        let next: LibraryLayoutMode = effectiveLayoutMode == .list ? .magazine : .list
+        if sessionLayoutMode != nil {
+            sessionLayoutMode = next
+        } else {
+            libraryLayoutMode = next
+        }
+    }
+    
+    private var listLayout: some View {
+        List {
+            ForEach(filteredSources) { source in
+                Button {
+                    navigationStateManager.selectionPath.append(.sourceView(source))
+                } label: {
+                    SourceRowView2(source: source, displayMode: isThumbnailMode ? .thumbnail : .minimal)
+                        .environmentObject(source)
+                }
+                .buttonStyle(.plain)
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    NavigationLink(value: SelectionState.edit(source), label: { Label("Edit", systemImage: "pencil")})
+                        .tint(.blue)
+
+                    Button(role: .destructive) {
+                        sourceToDelete = source
+                        showAlert = true
+                    } label: {
+                        Label("Delete", systemImage: "trash")
                     }
-                    .buttonStyle(PlainButtonStyle())
+                }
+                .contextMenu {
+                    Button {
+                        navigationStateManager.selectionPath.append(.sourceView(source))
+                    } label: {
+                        Label("Open Source", systemImage: "arrow.right.circle")
+                    }
+                } preview: {
+                    SourcePreviewCard(source: source)
                 }
             }
-            .padding()
+        }
+        .navigationBarTitle("", displayMode: .inline)
+        .refreshable {
+            sourceModel.updateSources()
+        }
+        .listStyle(.plain)
+    }
+    
+    private var magazineLayout: some View {
+        ScrollView {
+            LazyVGrid(columns: magazineColumns, spacing: 12) {
+                ForEach(filteredSources) { source in
+                    // Button (not NavigationLink) avoids SwiftUI auto-pushing when only one cell is present.
+                    Button {
+                        navigationStateManager.selectionPath.append(.sourceView(source))
+                    } label: {
+                        SourceMagazineCell(source: source)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            navigationStateManager.selectionPath.append(.sourceView(source))
+                        } label: {
+                            Label("Open Source", systemImage: "arrow.right.circle")
+                        }
+                        Button {
+                            navigationStateManager.selectionPath.append(.edit(source))
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                        Button(role: .destructive) {
+                            sourceToDelete = source
+                            showAlert = true
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    } preview: {
+                        SourcePreviewCard(source: source)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
         .refreshable {
             sourceModel.updateSources()
         }
     }
     
-    // Card view for grid layout
-    struct SourceCardView: View {
-        let source: Source
-        let placeholderImage: UIImage? = UIImage(named: "source_thumb")
-        @StateObject private var imageLoader = ImageLoader()
-        
-        var body: some View {
-            ZStack(alignment: .leading) {
-                HStack(spacing: 20) {
-                    if source.imageThumb != nil {
-                        Image(uiImage: source.imageThumb!)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 150, height: 150)
-                    } else {
-                        if let image = placeholderImage {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 150, height: 150)
-                        }
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(source.title)
-                            .font(.headline)
-                            .lineLimit(2)
-                        if let issue = source.issue, !issue.isEmpty {
-                            Text(source.issue!)
-                                .font(.subheadline)
-                                .lineLimit(1)
-                        }
-                        Text(source.dateString)
-                            .font(.subheadline)
-                            .lineLimit(1)
-                        Text("Number of clippings: \(source.clippings.count)")
-                            .font(.footnote)
-                            .lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: 120)
-            .padding()
-            .background(Color(.systemBackground))
-            .cornerRadius(8)
-            .shadow(radius: 1)
-            .onAppear {
-                if source.imageThumb == nil {
-                    print("source.imageThumb was nil... loading image")
-                    imageLoader.load(imagePath: source.imageUrlThumb, useCache: true) { success, downloadedImage in
-                        if success, let validImage = downloadedImage {
-                            source.imageThumb = downloadedImage
-                        } else {
-                            source.imageThumb = UIImage(named: "broken_image_link")
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
     var body: some View {
         VStack {
-            TextField("Search", text: $searchText)
+            TextField(searchFieldPrompt, text: $searchText)
                 .padding()
                 .background(Color.gray.opacity(0.2))
                 .cornerRadius(8)
@@ -197,7 +281,7 @@ struct LibraryView: View {
                     isTagSearchActive = (newValue == .sourceSearchField)
                 }
             
-            if isTagSearchActive && !sourceTitleSuggestions.isEmpty {
+            if !isTitleScoped && isTagSearchActive && !sourceTitleSuggestions.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: 8) {
                         ForEach(sourceTitleSuggestions, id: \.self) { title in
@@ -224,60 +308,29 @@ struct LibraryView: View {
                 )
             }
             
-            if shouldUseGrid {
-                // Grid layout for iPad landscape
-                gridLayout
+            if effectiveLayoutMode == .magazine {
+                magazineLayout
             } else {
-                // List layout for portrait and smaller screens
-                List {
-                    ForEach(filteredSources) { source in
-                        NavigationLink(value: SelectionState.sourceView(source), label: {
-                            SourceRowView2(source: source, displayMode: isThumbnailMode ? .thumbnail : .minimal)
-                                .environmentObject(source)
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    NavigationLink(value: SelectionState.edit(source), label: { Label("Edit", systemImage: "pencil")})
-                                        .tint(.blue)
-
-                                    Button(role: .destructive) {
-                                        sourceToDelete = source
-                                        showAlert = true
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
-                                    }
-                                }
-                        })
-                        .contextMenu {
-                            Button {
-                                navigationStateManager.selectionPath.append(.sourceView(source))
-                            } label: {
-                                Label("Open Source", systemImage: "arrow.right.circle")
-                            }
-                        } preview: {
-                            SourcePreviewCard(source: source)
-                        }
-                    }
-                }
-                .navigationBarTitle("", displayMode: .inline)
-                .refreshable {
-                    sourceModel.updateSources()
-                }
-                .listStyle(.plain)
+                listLayout
             }
 
-            Spacer()
+            Spacer(minLength: 0)
             
             HStack {
                 Text("Number of sources: \(filteredSources.count)")
                 Spacer()
-                if !shouldUseGrid {
+                if effectiveLayoutMode == .list {
                     Toggle(isOn: $isThumbnailMode) {}
                         .tint(.blue)
-                        .frame(width: 70)
-                    Image(systemName: "rectangle.expand.vertical")
+                        .scaleEffect(0.8)
+                        .frame(width: 50)
+                    Image(systemName: isThumbnailMode ? "arrow.up.and.down" : "arrow.up.to.line")
                         .font(Font.system(size: 15))
+                        .foregroundStyle(isThumbnailMode ? Color.accentColor : Color.secondary)
                         .padding(.leading, 1)
                 }
-            }.padding([.leading, .trailing],20)
+            }.padding(.horizontal, 20)
+            .padding(.vertical, 12)
             
         }
         .alert(isPresented: $showAlert) {
@@ -293,14 +346,6 @@ struct LibraryView: View {
             },
                   secondaryButton: .cancel()
             )
-        }
-        .onAppear {
-            // Check initial orientation
-            isLandscape = UIDevice.current.orientation.isLandscape
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
-            // Update orientation when device rotates
-            isLandscape = UIDevice.current.orientation.isLandscape
         }
         .onChange(of: searchText) { _ in
             enforceCoverageFilterValidity()
@@ -334,6 +379,17 @@ struct LibraryView: View {
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 12) {
+                    Button {
+                        toggleLayoutMode()
+                    } label: {
+                        Image(systemName: effectiveLayoutMode == .list ? "square.grid.2x2" : "list.bullet")
+                    }
+                    .accessibilityLabel(
+                        effectiveLayoutMode == .list
+                        ? "Switch to magazine rack view"
+                        : "Switch to list view"
+                    )
+                    
                     Button(action: {
                         sourceSortMode = sourceSortMode == .alphabetical ? .publicationDate : .alphabetical
                     }) {
@@ -368,7 +424,7 @@ struct LibraryView: View {
     
 }
 
-private struct SourcePreviewCard: View {
+struct SourcePreviewCard: View {
     @ObservedObject var source: Source
     @StateObject private var imageLoader = ImageLoader()
     @State private var previewImage: UIImage?
@@ -453,7 +509,6 @@ struct LibraryView_Previews: PreviewProvider {
         NavigationStack {
             LibraryView(sourceModel: {
                 let model = SourceModel()
-                // Add some sample sources for preview
                 let source1 = Source(title: "Sample Magazine", year: "2023", month: "January")
                 source1.id = "1"
                 

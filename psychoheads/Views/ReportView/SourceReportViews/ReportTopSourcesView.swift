@@ -5,17 +5,7 @@
 //  Created by Ryan Pavlovicz on 6/27/25.
 //
 
-
-//
-//  ReportTopSourcesView.swift
-//  psychoheads
-//
-//  Created by Ryan Pavlovicz on 6/10/24.
-//
-
-
 import SwiftUI
-import Charts
 
 struct ReportTopSourcesView: View {
     
@@ -29,29 +19,64 @@ struct ReportTopSourcesView: View {
     }
     
     var body: some View {
-        
-        VStack(alignment: .leading) {
-            Toggle("Sort Descending", isOn: $isSortedDescending)
-                .tint(.blue)
-                .padding(.bottom)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Spacer()
+                Toggle(isOn: $isSortedDescending) {}
+                    .labelsHidden()
+                    .tint(.blue)
+                    .scaleEffect(0.8)
+                    .frame(width: 50)
+                Image(systemName: isSortedDescending ? "arrow.down.to.line.compact" : "arrow.up.to.line.compact")
+                    .font(.body)
+                    .foregroundStyle(isSortedDescending ? Color.accentColor : Color.secondary)
+                    .accessibilityHidden(true)
+            }
+            .padding(.bottom, 8)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Sort order")
+            .accessibilityValue(isSortedDescending ? "Descending" : "Ascending")
             
-            List(sortedSourceCounts, id: \.name) { source in
-                HStack {
-                    Text(source.name)
-                    Spacer()
-                    Text("\(source.count)")
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(sortedSourceCounts.enumerated()), id: \.element.name) { index, source in
+                        Button {
+                            navigationStateManager.selectionPath.append(.libraryForTitle(source.name))
+                        } label: {
+                            HStack {
+                                Text(source.name)
+                                    .foregroundColor(.primary)
+                                Spacer()
+                                Text("\(source.count)")
+                                    .foregroundColor(.primary)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        
+                        if index < sortedSourceCounts.count - 1 {
+                            Divider()
+                        }
+                    }
                 }
             }
-            .listStyle(PlainListStyle())
+            .frame(maxHeight: 250)
         }
-        
-    } // body
+    }
 }
 
 struct ReportTopSourcesView_Previews: PreviewProvider {
     static var previews: some View {
-        ReportTopSourcesView()
-            .environmentObject(SourceModel())
-            .environmentObject(NavigationStateManager())
+        List {
+            Section {
+                ReportTopSourcesView()
+            }
+        }
+        .environmentObject(SourceModel())
+        .environmentObject(NavigationStateManager())
     }
 }

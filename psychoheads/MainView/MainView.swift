@@ -64,6 +64,27 @@ struct MainView: View {
                             .environmentObject(sourceModel)
                             .environmentObject(navigationStateManager)
                             .environment(\.managedObjectContext, viewContext)
+                    case .libraryForTitle(let title):
+                        LibraryView(
+                            sourceModel: sourceModel,
+                            initialSearchText: "",
+                            initialCoverageFilter: .all,
+                            exactTitleFilter: title,
+                            startInMagazineRack: true
+                        )
+                            .environmentObject(sourceModel)
+                            .environmentObject(navigationStateManager)
+                            .environment(\.managedObjectContext, viewContext)
+                    case .libraryForYear(let year, let coverage):
+                        LibraryView(
+                            sourceModel: sourceModel,
+                            initialCoverageFilter: coverage,
+                            yearFilter: year,
+                            startInMagazineRack: true
+                        )
+                            .environmentObject(sourceModel)
+                            .environmentObject(navigationStateManager)
+                            .environment(\.managedObjectContext, viewContext)
                     case .sourceView(let source):
                         LibrarySourceView(source: source)
                             .environmentObject(sourceModel)
@@ -115,7 +136,7 @@ struct MainView: View {
                             .environmentObject(navigationStateManager)
                             .environment(\.managedObjectContext, viewContext)
                     case .imageDiagnostics:
-                        ClippingImageDiagnosticsView()
+                        ImageDiagnosticsView()
                             .environmentObject(sourceModel)
                             .environmentObject(navigationStateManager)
 
