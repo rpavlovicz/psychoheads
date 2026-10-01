@@ -96,18 +96,32 @@ struct LibraryView: View {
         sourceModel.sources.filter { matchesYearFilter($0) }
     }
     
+    private var titlePoolForSearch: [Source] {
+        isYearScoped ? yearScopedSources : sourceModel.sources
+    }
+    
     var sourceTitleSuggestions: [String] {
-        let pool = isYearScoped ? yearScopedSources : sourceModel.sources
-        let uniqueTitles = Array(Set(pool.map { $0.title }.filter { !$0.isEmpty }))
+        let uniqueTitles = Array(Set(titlePoolForSearch.map { $0.title }.filter { !$0.isEmpty }))
         let filtered = uniqueTitles.filter { title in
             searchText.isEmpty || title.lowercased().contains(searchText.lowercased())
         }
         return filtered.sorted()
     }
     
+    /// True when the current query exactly matches a known title (computed once per filter pass).
+    private var queryMatchesKnownTitleExactly: Bool {
+        guard exactTitleFilter == nil else { return false }
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return false }
+        return titlePoolForSearch.contains {
+            $0.title.caseInsensitiveCompare(query) == .orderedSame
+        }
+    }
+    
     private var titleFilteredSources: [Source] {
-        sourceModel.sources.filter { source in
-            matchesYearFilter(source) && matchesTitleFilter(source)
+        let exactKnown = queryMatchesKnownTitleExactly
+        return sourceModel.sources.filter { source in
+            matchesYearFilter(source) && matchesTitleFilter(source, queryMatchesKnownTitleExactly: exactKnown)
         }
     }
     
@@ -115,9 +129,12 @@ struct LibraryView: View {
         !titleFilteredSources.contains(where: { $0.clippings.isEmpty })
     }
     
-    var filteredSources: [Source] {
-        sourceModel.sources(for: sourceCoverageFilter).filter { source in
-            matchesYearFilter(source) && matchesTitleFilter(source) && matchesSecondarySearch(source)
+    private func makeFilteredSources() -> [Source] {
+        let exactKnown = queryMatchesKnownTitleExactly
+        return sourceModel.sources(for: sourceCoverageFilter).filter { source in
+            matchesYearFilter(source)
+                && matchesTitleFilter(source, queryMatchesKnownTitleExactly: exactKnown)
+                && matchesSecondarySearch(source)
         }
         .sorted { lhs, rhs in
             SourcePublicationSortKey.shouldPrecede(lhs, rhs, mode: sourceSortMode, isReversed: isSortReversed)
@@ -130,7 +147,7 @@ struct LibraryView: View {
         return year == yearFilter
     }
     
-    private func matchesTitleFilter(_ source: Source) -> Bool {
+    private func matchesTitleFilter(_ source: Source, queryMatchesKnownTitleExactly: Bool) -> Bool {
         if let exactTitleFilter {
             return source.title.caseInsensitiveCompare(exactTitleFilter) == .orderedSame
         }
@@ -139,9 +156,7 @@ struct LibraryView: View {
         
         // If the query exactly matches a known title (e.g. autocomplete "Vanity Fair"),
         // require an exact title match so "Vanity Fair Italia" is not included.
-        let titlePool = isYearScoped ? yearScopedSources : sourceModel.sources
-        let uniqueTitles = Set(titlePool.map(\.title).filter { !$0.isEmpty })
-        if uniqueTitles.contains(where: { $0.caseInsensitiveCompare(query) == .orderedSame }) {
+        if queryMatchesKnownTitleExactly {
             return source.title.caseInsensitiveCompare(query) == .orderedSame
         }
         
@@ -171,9 +186,9 @@ struct LibraryView: View {
         }
     }
     
-    private var listLayout: some View {
+    private func listLayout(sources: [Source]) -> some View {
         List {
-            ForEach(filteredSources) { source in
+            ForEach(sources) { source in
                 Button {
                     navigationStateManager.selectionPath.append(.sourceView(source))
                 } label: {
@@ -210,10 +225,10 @@ struct LibraryView: View {
         .listStyle(.plain)
     }
     
-    private var magazineLayout: some View {
+    private func magazineLayout(sources: [Source]) -> some View {
         ScrollView {
             LazyVGrid(columns: magazineColumns, spacing: 12) {
-                ForEach(filteredSources) { source in
+                ForEach(sources) { source in
                     // Button (not NavigationLink) avoids SwiftUI auto-pushing when only one cell is present.
                     Button {
                         navigationStateManager.selectionPath.append(.sourceView(source))
@@ -252,6 +267,7 @@ struct LibraryView: View {
     }
     
     var body: some View {
+        let sources = makeFilteredSources()
         VStack {
             TextField(searchFieldPrompt, text: $searchText)
                 .padding()
@@ -309,15 +325,15 @@ struct LibraryView: View {
             }
             
             if effectiveLayoutMode == .magazine {
-                magazineLayout
+                magazineLayout(sources: sources)
             } else {
-                listLayout
+                listLayout(sources: sources)
             }
 
             Spacer(minLength: 0)
             
             HStack {
-                Text("Number of sources: \(filteredSources.count)")
+                Text("Number of sources: \(sources.count)")
                 Spacer()
                 if effectiveLayoutMode == .list {
                     Toggle(isOn: $isThumbnailMode) {}
