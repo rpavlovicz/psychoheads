@@ -32,6 +32,7 @@ struct SearchClippingView: View {
     // Add state for swipe sheet presentation
     @State private var showSwipeSheet: Bool = false
     @State private var swipeStartIndex: Int = 0
+    @State private var showCollage: Bool = false
     
     @State private var searchHeads: Bool = true
     @State private var searchTags: Bool = false
@@ -251,127 +252,188 @@ struct SearchClippingView: View {
             }
         }
     }
+
+    /// Heads with a real size, largest first, so the collage and the swipe sheet share one order.
+    private var collageHeads: [Clipping] {
+        filteredClippings
+            .filter { $0.isHead && !$0.isBody && $0.width > 0 && $0.height > 0 }
+            .sorted { $0.size > $1.size }
+    }
+
+    private var isCollage: Bool {
+        showCollage && !collageHeads.isEmpty
+    }
+
+    private var resultCountLabel: String {
+        if isCollage {
+            return collageHeads.count == 1 ? "1 head" : "\(collageHeads.count) heads"
+        }
+        return filteredClippings.count == 1 ? "1 clipping" : "\(filteredClippings.count) clippings"
+    }
     
     var body: some View {
         
         VStack {
             
-            ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))]) {
-                    ForEach(Array(filteredClippings.enumerated()), id: \.element.id) { index, clipping in
-                        
-                        // Replace NavigationLink with Button to trigger sheet
-                        Button(action: {
-                            swipeStartIndex = index
-                            showSwipeSheet = true
-                        }) {
-                            AsyncImage1(clipping: clipping, placeholder: placeholderImage ?? UIImage())
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        
-                    }
-                }
-            }
-            .padding(.horizontal)// ScrollView
-            
-            Spacer()
-            
-            // MARK: - expandable sheet
-            Button {
-                expandSheet.toggle()
-            } label: {
-                Image(systemName: "chevron.compact.up")
-            }
-            .padding(.bottom, 5)
-                            .sheet(isPresented: $expandSheet) {
-                
-                Form {
-                    Section(header: Text("Search Type")) {
-                        SearchSelectorView1(
-                            searchHeads: $searchHeads, 
-                            searchTags: $searchTags, 
-                            searchAllHeads: $searchAllHeads, 
-                            searchAllBodies: $searchAllBodies,
-                            lookingDirection: $lookingDirection,
-                            filterMan: $filterMan,
-                            filterWoman: $filterWoman,
-                            filterTrans: $filterTrans,
-                            filterWhite: $filterWhite,
-                            filterBlack: $filterBlack,
-                            filterLatino: $filterLatino,
-                            filterAsian: $filterAsian,
-                            filterIndian: $filterIndian,
-                            filterNative: $filterNative,
-                            filterBlackAndWhite: $filterBlackAndWhite,
-                            filterAnimal: $filterAnimal,
-                            minHeight: $minHeight,
-                            maxHeight: $maxHeight,
-                            heightRange: dynamicHeightRange,
-                            onHeightAdjust: { userHasSetHeightRange = true }
-                        )
-                    }
-                }
-                .background(Color.clear) // Set the background to clear
-                .presentationDetents(UIDevice.current.userInterfaceIdiom == .pad ? [.large] : [.medium, .large])
-            }
-            .background(Color.clear) // Set the background to clear
+            Text(resultCountLabel)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
 
-            
-            // MARK: - filter search results
-            let sortedHeadNames = existingHeadNames.filter({ sourceText in searchText == "" ? true : sourceText.lowercased().contains(searchText.lowercased())})
-            
-            if (isTagSearchActive && !sortedHeadNames.isEmpty) {
-                ScrollView(.horizontal) {
-                    LazyHStack {
-                        ForEach(sortedHeadNames, id: \.self) { headName in
-                            TagView2(tag: headName) {
-                                searchText = headName
-                                focusedField = nil
+            Group {
+                if isCollage {
+                    SearchHeadCollageView(
+                        clippings: collageHeads,
+                        placeholder: placeholderImage ?? UIImage(),
+                        onSelect: { clipping in
+                            if let index = collageHeads.firstIndex(where: { $0.id == clipping.id }) {
+                                swipeStartIndex = index
+                                showSwipeSheet = true
+                            }
+                        }
+                    )
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))]) {
+                            ForEach(Array(filteredClippings.enumerated()), id: \.element.id) { index, clipping in
+                                
+                                Button(action: {
+                                    swipeStartIndex = index
+                                    showSwipeSheet = true
+                                }) {
+                                    AsyncImage1(clipping: clipping, placeholder: placeholderImage ?? UIImage())
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                
                             }
                         }
                     }
-                    .padding(.leading, 20)
-                    .frame(height: 30)
+                    .padding(.horizontal)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             
-            // MARK: - search bar
-            TextField("Search", text: $searchText)
-                .padding()
-                .background(Color.gray.opacity(0.2))
-                .cornerRadius(8)
-                .padding()
-                .padding(.top, -10)
-                .overlay(
-                    Group {
-                        if !searchText.isEmpty {
-                            Button(action: {
-                                searchText = ""
-                            }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.gray)
-                                    .padding(.trailing, 10)
-                            }
-                            .padding(.vertical)
-                            .padding(.trailing)
-                            .padding(.top, -10)
-                        }
-                    },
-                    alignment: .trailing
-                )
-                .focused($focusedField, equals: .tagSearchField)
-                .onChange(of: focusedField) { newValue in
-                    isTagSearchActive = (newValue == .tagSearchField)
+            // MARK: - search chrome
+            VStack(spacing: 0) {
+                Divider()
+
+                Button {
+                    expandSheet.toggle()
+                } label: {
+                    Image(systemName: "chevron.compact.up")
+                        .font(.title3)
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .sheet(isPresented: $expandSheet) {
+                    Form {
+                        Section(header: Text("Search Type")) {
+                            SearchSelectorView1(
+                                searchHeads: $searchHeads,
+                                searchTags: $searchTags,
+                                searchAllHeads: $searchAllHeads,
+                                searchAllBodies: $searchAllBodies,
+                                lookingDirection: $lookingDirection,
+                                filterMan: $filterMan,
+                                filterWoman: $filterWoman,
+                                filterTrans: $filterTrans,
+                                filterWhite: $filterWhite,
+                                filterBlack: $filterBlack,
+                                filterLatino: $filterLatino,
+                                filterAsian: $filterAsian,
+                                filterIndian: $filterIndian,
+                                filterNative: $filterNative,
+                                filterBlackAndWhite: $filterBlackAndWhite,
+                                filterAnimal: $filterAnimal,
+                                minHeight: $minHeight,
+                                maxHeight: $maxHeight,
+                                heightRange: dynamicHeightRange,
+                                onHeightAdjust: { userHasSetHeightRange = true }
+                            )
+                        }
+                    }
+                    .presentationDetents(UIDevice.current.userInterfaceIdiom == .pad ? [.large] : [.medium, .large])
+                }
+
+                let sortedHeadNames = existingHeadNames.filter({ sourceText in searchText == "" ? true : sourceText.lowercased().contains(searchText.lowercased())})
+
+                if isTagSearchActive && !sortedHeadNames.isEmpty {
+                    ScrollView(.horizontal) {
+                        LazyHStack {
+                            ForEach(sortedHeadNames, id: \.self) { headName in
+                                TagView2(tag: headName) {
+                                    searchText = headName
+                                    focusedField = nil
+                                }
+                            }
+                        }
+                        .padding(.leading, 20)
+                        .frame(height: 30)
+                    }
+                }
+
+                TextField("Search", text: $searchText)
+                    .padding()
+                    .background(Color.gray.opacity(0.2))
+                    .cornerRadius(8)
+                    .padding(.horizontal)
+                    .padding(.bottom, 12)
+                    .overlay(
+                        Group {
+                            if !searchText.isEmpty {
+                                Button(action: {
+                                    searchText = ""
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.gray)
+                                        .padding(.trailing, 10)
+                                }
+                                .padding(.vertical)
+                                .padding(.trailing)
+                                .padding(.bottom, 12)
+                            }
+                        },
+                        alignment: .trailing
+                    )
+                    .focused($focusedField, equals: .tagSearchField)
+                    .onChange(of: focusedField) { newValue in
+                        isTagSearchActive = (newValue == .tagSearchField)
+                    }
+            }
+            .background(Color(.systemBackground))
             
         } // main VStack
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if !collageHeads.isEmpty {
+                    Button {
+                        showCollage.toggle()
+                    } label: {
+                        Image(systemName: showCollage ? "person.3" : "square.grid.2x2")
+                            .imageScale(.large)
+                            .animation(.easeOut(duration: 0.15), value: showCollage)
+                    }
+                    .accessibilityLabel(showCollage ? "Show grid" : "Show collage")
+                }
+            }
+        }
         .onChange(of: dynamicHeightRange, initial: true) { _, newRange in
             syncHeightBounds(to: newRange)
+        }
+        .onChange(of: collageHeads.count) { _, count in
+            if count == 0 {
+                showCollage = false
+            }
         }
         // Sheet presentation for ClippingsSwipeView
         .sheet(isPresented: $showSwipeSheet) {
             NavigationStack {
-                ClippingsSwipeView(clippings: filteredClippings, currentIndex: $swipeStartIndex)
+                ClippingsSwipeView(clippings: isCollage ? collageHeads : filteredClippings, currentIndex: $swipeStartIndex)
                     .environmentObject(sourceModel)
                     .environmentObject(navigationStateManager)
                     .environment(\.managedObjectContext, managedObjectContext)
