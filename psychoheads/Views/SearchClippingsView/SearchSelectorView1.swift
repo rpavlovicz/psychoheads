@@ -39,7 +39,8 @@ struct SearchSelectorView1: View {
     // Height range slider bindings
     @Binding var minHeight: Double
     @Binding var maxHeight: Double
-    @Binding var heightRange: ClosedRange<Double>
+    let heightRange: ClosedRange<Double>
+    var onHeightAdjust: () -> Void = {}
     
     var body: some View {
         
@@ -337,30 +338,24 @@ struct SearchSelectorView1: View {
                     .foregroundColor(.secondary)
                     .padding(.leading, 4)
                 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Height: \(String(format: "%.1f", minHeight)) - \(String(format: "%.1f", maxHeight)) cm")
-                            .font(.caption2)
-                            .foregroundColor(.primary)
-                        Spacer()
-                        Text("Available: \(String(format: "%.1f", heightRange.lowerBound)) - \(String(format: "%.1f", heightRange.upperBound)) cm")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    RangeSlider2(
-                        minValue: $minHeight,
-                        maxValue: $maxHeight,
-                        range: heightRange,
-                        step: 0.1,
-                        accentColor: .green
-                    )
-                }
+                Text("\(String(format: "%.1f", minHeight)) – \(String(format: "%.1f", maxHeight)) cm")
+                    .font(.caption2)
+                    .foregroundColor(.primary)
+                    .padding(.leading, 4)
+
+                RangeSlider2(
+                    minValue: $minHeight,
+                    maxValue: $maxHeight,
+                    range: heightRange,
+                    step: 0.1,
+                    accentColor: .green,
+                    onUserAdjust: onHeightAdjust
+                )
                 .padding(.horizontal, 4)
                 
                 // Help text for height filter
                 VStack(alignment: .leading, spacing: 2) {
-                    let hasHeightFilter = minHeight > heightRange.lowerBound || maxHeight < heightRange.upperBound
+                    let hasHeightFilter = minHeight > heightRange.lowerBound + 0.001 || maxHeight < heightRange.upperBound - 0.001
                     if hasHeightFilter {
                         Text("• Filtering by height range")
                             .font(.caption2)
@@ -427,7 +422,7 @@ struct SearchSelectorView1_Previews: PreviewProvider {
                 filterAnimal: .constant(false),
                 minHeight: .constant(3.0),
                 maxHeight: .constant(15.0),
-                heightRange: .constant(3.0...15.0)
+                heightRange: 3.0...15.0
             )
             .previewDisplayName("SearchSelectorView1 - Default (Heads)")
             
@@ -451,7 +446,7 @@ struct SearchSelectorView1_Previews: PreviewProvider {
                 filterAnimal: .constant(false),
                 minHeight: .constant(3.0),
                 maxHeight: .constant(15.0),
-                heightRange: .constant(3.0...15.0)
+                heightRange: 3.0...15.0
             )
             .previewDisplayName("SearchSelectorView1 - Tags Selected")
             
@@ -475,7 +470,7 @@ struct SearchSelectorView1_Previews: PreviewProvider {
                 filterAnimal: .constant(false),
                 minHeight: .constant(3.0),
                 maxHeight: .constant(15.0),
-                heightRange: .constant(3.0...15.0)
+                heightRange: 3.0...15.0
             )
             .previewDisplayName("SearchSelectorView1 - All Heads")
             
@@ -499,7 +494,7 @@ struct SearchSelectorView1_Previews: PreviewProvider {
                 filterAnimal: .constant(false),
                 minHeight: .constant(3.0),
                 maxHeight: .constant(15.0),
-                heightRange: .constant(3.0...15.0)
+                heightRange: 3.0...15.0
             )
             .previewDisplayName("SearchSelectorView1 - All Heads + Heads Search")
             
@@ -523,7 +518,7 @@ struct SearchSelectorView1_Previews: PreviewProvider {
                 filterAnimal: .constant(false),
                 minHeight: .constant(3.0),
                 maxHeight: .constant(15.0),
-                heightRange: .constant(3.0...15.0)
+                heightRange: 3.0...15.0
             )
             .previewDisplayName("SearchSelectorView1 - All Heads + Tags Search")
             
@@ -547,7 +542,7 @@ struct SearchSelectorView1_Previews: PreviewProvider {
                 filterAnimal: .constant(false),
                 minHeight: .constant(3.0),
                 maxHeight: .constant(15.0),
-                heightRange: .constant(3.0...15.0)
+                heightRange: 3.0...15.0
             )
             .previewDisplayName("SearchSelectorView1 - All Heads + Both + Left Direction")
             
@@ -571,7 +566,7 @@ struct SearchSelectorView1_Previews: PreviewProvider {
                 filterAnimal: .constant(false),
                 minHeight: .constant(3.0),
                 maxHeight: .constant(15.0),
-                heightRange: .constant(3.0...15.0)
+                heightRange: 3.0...15.0
             )
             .previewDisplayName("SearchSelectorView1 - Full Face Direction")
         }

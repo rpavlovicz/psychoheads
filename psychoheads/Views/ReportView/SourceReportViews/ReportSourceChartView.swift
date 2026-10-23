@@ -15,6 +15,9 @@ struct ReportSourceChartView: View {
     @State private var isScrollable: Bool = false
     @State private var useFixedYScale: Bool = false
     @State private var sourceCoverageFilter: SourceCoverageFilter = .withClippings
+    /// Keeps the zoomed chart's horizontal scroll stable across Y-scale toggles.
+    @State private var scrollPositionYear: Int = 0
+    @State private var hasInitializedScrollPosition = false
     
     private let barWidth: CGFloat = 12
     private let labelXOffset: CGFloat = -20
@@ -39,9 +42,30 @@ struct ReportSourceChartView: View {
         return minYear...maxYear
     }
     
+    private var yScaleDomain: ClosedRange<Int> {
+        if useFixedYScale { return fixedYDomain }
+        let maxCount = max(yearCounts.map(\.count).max() ?? 1, 1)
+        return 0...maxCount
+    }
+    
     /// Caps displayed bar height when fixed Y scale is on so overflow is not drawn.
     private func displayCount(_ value: Int) -> Int {
         useFixedYScale ? min(value, fixedYMax) : value
+    }
+    
+    private func initializeScrollPositionIfNeeded(minYear: Int) {
+        guard !hasInitializedScrollPosition else { return }
+        scrollPositionYear = minYear
+        hasInitializedScrollPosition = true
+    }
+    
+    /// 5-year ticks for the overview chart, always including maxYear when it falls off-stride.
+    private func overviewYearTicks(minYear: Int, maxYear: Int) -> [Int] {
+        var ticks = Array(stride(from: minYear, through: maxYear, by: 5))
+        if ticks.last != maxYear {
+            ticks.append(maxYear)
+        }
+        return ticks
     }
 
     var body: some View {
@@ -57,6 +81,7 @@ struct ReportSourceChartView: View {
                             sourceBarsContent()
                         }
                         .chartScrollableAxes(.horizontal)
+                        .chartScrollPosition(x: $scrollPositionYear)
                         .chartXAxis {
                             AxisMarks(values: Array(minYear...maxYear)) { value in
                                 AxisGridLine()
@@ -71,11 +96,23 @@ struct ReportSourceChartView: View {
                             }
                         }
                         .chartXScale(domain: minYear-1...maxYear+3)
-                        .modifier(SourceChartYScaleModifier(
-                            useFixedYScale: useFixedYScale,
-                            fixedDomain: fixedYDomain,
-                            fixedTicks: fixedYTicks
-                        ))
+                        .chartYScale(domain: yScaleDomain)
+                        .chartYAxis {
+                            if useFixedYScale {
+                                AxisMarks(values: fixedYTicks) { _ in
+                                    AxisGridLine()
+                                    AxisValueLabel()
+                                }
+                            } else {
+                                AxisMarks { _ in
+                                    AxisGridLine()
+                                    AxisValueLabel()
+                                }
+                            }
+                        }
+                        .chartPlotStyle { plotArea in
+                            plotArea.clipped()
+                        }
                         .frame(height: 150)
                         .padding(.top, 12)
                         .padding(.bottom, 40)
@@ -89,13 +126,20 @@ struct ReportSourceChartView: View {
                                     )
                                 }
                         }
+                        .onAppear {
+                            initializeScrollPositionIfNeeded(minYear: minYear)
+                        }
+                        .onChange(of: sourceCoverageFilter) { _ in
+                            scrollPositionYear = minYear
+                            hasInitializedScrollPosition = true
+                        }
                         
                     } else {
                         Chart {
                             sourceBarsContent()
                         }
                         .chartXAxis {
-                            AxisMarks(values: Array(stride(from: minYear, through: maxYear, by: 5))) { value in
+                            AxisMarks(values: overviewYearTicks(minYear: minYear, maxYear: maxYear)) { value in
                                 AxisGridLine()
                                 AxisValueLabel {
                                     if let intValue = value.as(Int.self) {
@@ -107,15 +151,30 @@ struct ReportSourceChartView: View {
                                 }
                             }
                         }
-                        .chartXScale(domain: minYear-2...maxYear+7)
-                        .modifier(SourceChartYScaleModifier(
-                            useFixedYScale: useFixedYScale,
-                            fixedDomain: fixedYDomain,
-                            fixedTicks: fixedYTicks
-                        ))
+                        // Modest trailing domain so the last rotated year label fits
+                        // without a large empty gap before the Y-axis.
+                        .chartXScale(domain: minYear-2...maxYear+5)
+                        .chartYScale(domain: yScaleDomain)
+                        .chartYAxis {
+                            if useFixedYScale {
+                                AxisMarks(position: .trailing, values: fixedYTicks) { _ in
+                                    AxisGridLine()
+                                    AxisValueLabel()
+                                }
+                            } else {
+                                AxisMarks(position: .trailing) { _ in
+                                    AxisGridLine()
+                                    AxisValueLabel()
+                                }
+                            }
+                        }
+                        .chartPlotStyle { plotArea in
+                            plotArea.clipped()
+                        }
                         .frame(height: 150)
                         .padding(.top, 12)
                         .padding(.bottom, 40)
+                        .padding(.trailing, 4)
                     }
                     
                     bottomControls
@@ -218,30 +277,6 @@ struct ReportSourceChartView: View {
                 Image(systemName: "chevron.down")
                     .font(.caption2)
             }
-        }
-    }
-}
-
-private struct SourceChartYScaleModifier: ViewModifier {
-    let useFixedYScale: Bool
-    let fixedDomain: ClosedRange<Int>
-    let fixedTicks: [Int]
-    
-    func body(content: Content) -> some View {
-        if useFixedYScale {
-            content
-                .chartYScale(domain: fixedDomain)
-                .chartYAxis {
-                    AxisMarks(values: fixedTicks) { _ in
-                        AxisGridLine()
-                        AxisValueLabel()
-                    }
-                }
-                .chartPlotStyle { plotArea in
-                    plotArea.clipped()
-                }
-        } else {
-            content
         }
     }
 }

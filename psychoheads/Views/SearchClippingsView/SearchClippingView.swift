@@ -52,10 +52,11 @@ struct SearchClippingView: View {
     @State private var filterBlackAndWhite: Bool = false
     @State private var filterAnimal: Bool = false
     
-    // Height range state variables
+    // Height range state variables. Until the slider is moved, the selection
+    // tracks the full library range so the filter stays inactive.
     @State private var minHeight: Double = 3.0
     @State private var maxHeight: Double = 15.0
-    @State private var heightRange: ClosedRange<Double> = 3.0...15.0
+    @State private var userHasSetHeightRange = false
     
     // Dynamic range calculation
     var dynamicHeightRange: ClosedRange<Double> {
@@ -68,6 +69,35 @@ struct SearchClippingView: View {
         let maxAvailable = heights.max() ?? 15.0
         
         return minAvailable...maxAvailable
+    }
+
+    /// Selected window used for filtering. Follows the library range until the user drags the slider.
+    private var selectedHeightBounds: ClosedRange<Double> {
+        let available = dynamicHeightRange
+        guard userHasSetHeightRange else { return available }
+
+        var lower = min(max(minHeight, available.lowerBound), available.upperBound)
+        var upper = min(max(maxHeight, available.lowerBound), available.upperBound)
+        if upper < lower {
+            upper = lower
+        }
+        return lower...upper
+    }
+
+    private func syncHeightBounds(to available: ClosedRange<Double>) {
+        if !userHasSetHeightRange {
+            minHeight = available.lowerBound
+            maxHeight = available.upperBound
+            return
+        }
+
+        var lower = min(max(minHeight, available.lowerBound), available.upperBound)
+        var upper = min(max(maxHeight, available.lowerBound), available.upperBound)
+        if upper < lower {
+            upper = lower
+        }
+        minHeight = lower
+        maxHeight = upper
     }
     
     let placeholderImage: UIImage? = UIImage(named: "clipping_thumb")
@@ -161,10 +191,12 @@ struct SearchClippingView: View {
             }
             
             // Apply height filter
-            let hasHeightFilter = minHeight > dynamicHeightRange.lowerBound || maxHeight < dynamicHeightRange.upperBound
+            let heightBounds = selectedHeightBounds
+            let hasHeightFilter = heightBounds.lowerBound > dynamicHeightRange.lowerBound + 0.001
+                || heightBounds.upperBound < dynamicHeightRange.upperBound - 0.001
             if hasHeightFilter {
                 filteredClippings = filteredClippings.filter { clipping in
-                    clipping.height >= minHeight && clipping.height <= maxHeight
+                    clipping.height >= heightBounds.lowerBound && clipping.height <= heightBounds.upperBound
                 }
             }
             
@@ -274,7 +306,8 @@ struct SearchClippingView: View {
                             filterAnimal: $filterAnimal,
                             minHeight: $minHeight,
                             maxHeight: $maxHeight,
-                            heightRange: .constant(dynamicHeightRange)
+                            heightRange: dynamicHeightRange,
+                            onHeightAdjust: { userHasSetHeightRange = true }
                         )
                     }
                 }
@@ -330,13 +363,11 @@ struct SearchClippingView: View {
                 .onChange(of: focusedField) { newValue in
                     isTagSearchActive = (newValue == .tagSearchField)
                 }
-                .onChange(of: dynamicHeightRange) { newRange in
-                    // Reset slider to full range when available range changes
-                    minHeight = newRange.lowerBound
-                    maxHeight = newRange.upperBound
-                }
             
         } // main VStack
+        .onChange(of: dynamicHeightRange, initial: true) { _, newRange in
+            syncHeightBounds(to: newRange)
+        }
         // Sheet presentation for ClippingsSwipeView
         .sheet(isPresented: $showSwipeSheet) {
             NavigationStack {

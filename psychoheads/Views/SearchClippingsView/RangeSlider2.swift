@@ -13,194 +13,148 @@ struct RangeSlider2: View {
     let range: ClosedRange<Double>
     let step: Double
     let accentColor: Color
-    
-    @State var selectedMinPosition: CGFloat = 0
-    @State var selectedMaxPosition: CGFloat = 15
-    @State var totalSliderWidth: CGFloat = 0
-    
-    @State var isDraggingLeft = false
-    @State var isDraggingRight = false
-    
-    let offsetValue: CGFloat = 40
-    
-    var lowerValue: Int {
-        Int(map(value: selectedMinPosition, from: 0...totalSliderWidth, to: range))
-    }
-    
-    var upperValue: Int {
-        Int(map(value: selectedMaxPosition, from: 0...totalSliderWidth, to: range))
-    }
-    
+    var onUserAdjust: () -> Void = {}
+
+    private let thumbSize: CGFloat = 28
+    private let trackSpace = "clippingHeightTrack"
+    @State private var dragStart: (isMin: Bool, value: Double)?
+
     var body: some View {
-        ZStack {
-            Color(.systemGray6)
-            GeometryReader{ geometry in
-                
-                VStack(spacing: 30) {
-                    
-                    Text("\(String(format: "%.1f", Double(lowerValue))) - \(String(format: "%.1f", Double(upperValue))) cm").bold()
-                        .foregroundStyle(accentColor)
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let minX = xPosition(for: minValue, width: width)
+            let maxX = xPosition(for: maxValue, width: width)
 
-                    ZStack(alignment: .leading) {
-                        
-                        // grey bar
-                        RoundedRectangle(cornerRadius: 10)
-                            .foregroundStyle(.gray)
-                            .opacity(0.3)
-                            .frame(height: 6)
-                            .padding(.horizontal, 6)
-                        
-                        
-                        // selected range color bar
-                        Rectangle()
-                            .foregroundStyle(accentColor)
-                            .frame(width: selectedMaxPosition - selectedMinPosition, height: 6)
-                            .offset(x: selectedMinPosition + 20)
-                        
-                        HStack(spacing: 0) {
-                            DraggableCircle(isLeft: true,
-                                            isDragging: $isDraggingLeft,
-                                            position: $selectedMinPosition,
-                                            otherPosition: $selectedMaxPosition,
-                                            limit: totalSliderWidth,
-                                            circleColor: accentColor)
-                            DraggableCircle(isLeft: false,
-                                            isDragging: $isDraggingRight,
-                                            position: $selectedMaxPosition,
-                                            otherPosition: $selectedMinPosition,
-                                            limit: totalSliderWidth,
-                                            circleColor: accentColor)
-                        } // draggable circle HStack
-                        
-                        ValueBox(isDragging: isDraggingLeft, value: lowerValue,
-                                 position: selectedMinPosition, xOffset: -18)
-                        ValueBox(isDragging: isDraggingRight, value: upperValue,
-                                 position: selectedMaxPosition, xOffset: 0)
-                            
-                    } // bar ZStack
-                    .offset(y: 8)
-                    
-                } // VStack
-                .frame(maxWidth: geometry.size.width, maxHeight: 130)
-                //.padding(.horizontal, 30)
-                .onAppear() {
-                    totalSliderWidth = geometry.size.width - offsetValue
-                    // Initialize positions based on current values
-                    selectedMinPosition = map(value: minValue, from: range, to: 0...totalSliderWidth)
-                    selectedMaxPosition = map(value: maxValue, from: range, to: 0...totalSliderWidth)
-                }
-                .onChange(of: selectedMinPosition) { newPosition in
-                    minValue = map(value: newPosition, from: 0...totalSliderWidth, to: range)
-                }
-                .onChange(of: selectedMaxPosition) { newPosition in
-                    maxValue = map(value: newPosition, from: 0...totalSliderWidth, to: range)
-                }
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color(.systemGray4))
+                    .frame(width: max(0, width - thumbSize), height: 4)
+                    .offset(x: thumbSize / 2)
 
-            } // GeometryReader
-            .frame(height: 130)
-            .padding(.horizontal, 30)
-            .background(.white, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .padding(.horizontal, 10)
-            .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 0)
+                Capsule()
+                    .fill(accentColor)
+                    .frame(width: max(0, maxX - minX), height: 4)
+                    .offset(x: minX)
+
+                thumb(isMin: true, width: width)
+                thumb(isMin: false, width: width)
+            }
+            .frame(width: width, height: thumbSize, alignment: .leading)
+            .coordinateSpace(name: trackSpace)
         }
-        .ignoresSafeArea()
-        
-        
-    } // View
-    
-    func map(value: CGFloat, from: ClosedRange<CGFloat>, to: ClosedRange<CGFloat>) ->
-        CGFloat {
-            let inputRange = from.upperBound - from.lowerBound
-            guard inputRange != 0 else { return 0 }
-            let outputRange = to.upperBound - to.lowerBound
-            return (value - from.lowerBound) / inputRange * outputRange + to.lowerBound
+        .frame(height: thumbSize)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Clipping height")
+        .accessibilityValue("\(formatted(minValue)) to \(formatted(maxValue)) centimeters")
+    }
+
+    private func thumb(isMin: Bool, width: CGFloat) -> some View {
+        let value = isMin ? minValue : maxValue
+        return Circle()
+            .fill(accentColor)
+            .frame(width: 22, height: 22)
+            .shadow(color: .black.opacity(0.18), radius: 1.5, y: 1)
+            .frame(width: thumbSize, height: thumbSize)
+            .contentShape(Circle())
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .named(trackSpace))
+                    .onChanged { gesture in
+                        onUserAdjust()
+                        let start: (isMin: Bool, value: Double)
+                        if let dragStart, dragStart.isMin == isMin {
+                            start = dragStart
+                        } else {
+                            start = (isMin, value)
+                            dragStart = start
+                        }
+                        let raw = valueForX(
+                            xPosition(for: start.value, width: width) + gesture.translation.width,
+                            width: width
+                        )
+                        if isMin {
+                            minValue = limited(snap(raw), ceiling: maxValue - separation)
+                        } else {
+                            maxValue = limited(snap(raw), floor: minValue + separation)
+                        }
+                    }
+                    .onEnded { _ in
+                        dragStart = nil
+                    }
+            )
+            .offset(x: xPosition(for: value, width: width) - thumbSize / 2)
+    }
+
+    private var separation: Double {
+        let span = range.upperBound - range.lowerBound
+        guard step > 0, span >= step else { return 0 }
+        return step
+    }
+
+    private func xPosition(for value: Double, width: CGFloat) -> CGFloat {
+        let inset = thumbSize / 2
+        let usable = max(width - thumbSize, 0)
+        let span = range.upperBound - range.lowerBound
+        guard span > 0, usable > 0 else { return width / 2 }
+        let progress = min(max((value - range.lowerBound) / span, 0), 1)
+        return inset + CGFloat(progress) * usable
+    }
+
+    private func valueForX(_ x: CGFloat, width: CGFloat) -> Double {
+        let inset = thumbSize / 2
+        let usable = max(width - thumbSize, 1)
+        let span = range.upperBound - range.lowerBound
+        guard span > 0 else { return range.lowerBound }
+        let progress = min(max(Double((x - inset) / usable), 0), 1)
+        return range.lowerBound + progress * span
+    }
+
+    private func snap(_ raw: Double) -> Double {
+        let lower = range.lowerBound
+        let upper = range.upperBound
+        guard step > 0, upper > lower else { return lower }
+        if raw <= lower + step / 2 { return lower }
+        if raw >= upper - step / 2 { return upper }
+        let snapped = (raw / step).rounded() * step
+        let cleaned = (snapped * 1000).rounded() / 1000
+        return min(max(cleaned, lower), upper)
+    }
+
+    private func limited(_ value: Double, ceiling: Double? = nil, floor: Double? = nil) -> Double {
+        var result = min(max(value, range.lowerBound), range.upperBound)
+        if let ceiling {
+            result = min(result, ceiling)
         }
-    
-    func map(value: Double, from: ClosedRange<Double>, to: ClosedRange<CGFloat>) ->
-        CGFloat {
-            let inputRange = from.upperBound - from.lowerBound
-            guard inputRange != 0 else { return 0 }
-            let outputRange = to.upperBound - to.lowerBound
-            return CGFloat((value - from.lowerBound) / inputRange) * outputRange + to.lowerBound
+        if let floor {
+            result = max(result, floor)
         }
-    
-    func map(value: CGFloat, from: ClosedRange<CGFloat>, to: ClosedRange<Double>) ->
-        Double {
-            let inputRange = from.upperBound - from.lowerBound
-            guard inputRange != 0 else { return 0 }
-            let outputRange = to.upperBound - to.lowerBound
-            return Double((value - from.lowerBound) / inputRange) * outputRange + to.lowerBound
-        }
-    
+        return min(max(result, range.lowerBound), range.upperBound)
+    }
+
+    private func formatted(_ value: Double) -> String {
+        String(format: "%.1f", value)
+    }
 }
 
-struct DraggableCircle: View {
-    
-    var isLeft: Bool
-    @Binding var isDragging: Bool
-    @Binding var position: CGFloat
-    @Binding var otherPosition: CGFloat
-    var limit: CGFloat
-    var circleColor: Color
-    
-    var body: some View {
-        ZStack {
-            Circle().frame(width: 25, height: 25).foregroundStyle(circleColor)
-            Circle().frame(width: 15, height: 25).foregroundStyle(.white)
-        } // ZStack
-        .offset(x: position + (isLeft ? 0 : -5))
-        .gesture(
-            DragGesture()
-                .onChanged({ value in
-                    withAnimation {
-                        isDragging = true
-                    }
-                    if isLeft {
-                        position = min( max(value.location.x, 0), otherPosition )
-                    } else {
-                        position = min( max(value.location.x, otherPosition), limit )
-                    }
-                }) // onChanged
-                .onEnded({ value in
-                    withAnimation {
-                        isDragging = false
-                    }
-                })
-            
-        ) // gesture
-            
-    } // View
-} // DraggableCircle struct
-
-struct ValueBox: View {
-    
-    var isDragging: Bool
-    var value: Int
-    var position: CGFloat
-    var xOffset: CGFloat
-    
-    var body: some View {
-        
-        ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .frame(width: 60, height: 40)
-                .foregroundStyle(isDragging ? .black : .clear)
-            Text("$\(value)")
-                .foregroundStyle(isDragging ? .white : .clear)
-        }
-        .scaleEffect(isDragging ? 1: 0)
-        .offset(x: position + xOffset, y: isDragging ? -40 : 0)
-        
-    } // View
-    
-} // ValueBox struct
-
 #Preview {
-    RangeSlider2(
-        minValue: .constant(3.0),
-        maxValue: .constant(10.0),
-        range: 2.0...15.0,
-        step: 0.1,
-        accentColor: .green
-    )
+    struct PreviewHost: View {
+        @State var minValue = 4.0
+        @State var maxValue = 12.0
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("\(String(format: "%.1f", minValue)) – \(String(format: "%.1f", maxValue)) cm")
+                    .font(.caption2)
+                RangeSlider2(
+                    minValue: $minValue,
+                    maxValue: $maxValue,
+                    range: 3.2...18.4,
+                    step: 0.1,
+                    accentColor: .green
+                )
+            }
+            .padding()
+        }
+    }
+
+    return PreviewHost()
 }
