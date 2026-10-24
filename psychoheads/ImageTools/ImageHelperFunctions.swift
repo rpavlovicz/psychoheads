@@ -263,19 +263,15 @@ struct AsyncImage1: View {
     @StateObject private var imageLoader = ImageLoader()
     var clipping: Clipping
     var placeholder: UIImage
+    /// When set, the thumbnail is drawn in this box. Otherwise it fits a 150-point height.
+    var displaySize: CGSize? = nil
     
     var body: some View {
         ZStack {
             if clipping.imageThumb != nil {
-                Image(uiImage: clipping.imageThumb!)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: 150)
+                fitted(Image(uiImage: clipping.imageThumb!))
             } else {
-                    Image(uiImage: placeholder)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 150)
+                fitted(Image(uiImage: placeholder))
             }
         }
         .onAppear {
@@ -297,6 +293,13 @@ struct AsyncImage1: View {
                 }
             }
         }
+    }
+
+    private func fitted(_ image: Image) -> some View {
+        image
+            .resizable()
+            .scaledToFit()
+            .frame(width: displaySize?.width, height: displaySize?.height ?? 150)
     }
 }
 

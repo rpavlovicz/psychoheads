@@ -30,6 +30,7 @@ enum SelectionState: Hashable, Codable {
     case editClippingSourceView(Clipping)
     case edit(Source)
     case searchClippings([Clipping]?)
+    case searchForTag(String)
     case collageView
     case reportView
     case reportSourceDetailView

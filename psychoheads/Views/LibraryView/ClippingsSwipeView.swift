@@ -23,6 +23,8 @@ struct ClippingsSwipeView: View {
     @Binding var currentIndex: Int
     /// When non-nil, Edit pushes onto this path (sheet). Otherwise uses main navigation path.
     var sheetPath: Binding<[SelectionState]>? = nil
+    /// When the Source row matches this id, it closes the sheet instead of pushing another source page.
+    var dismissToSourceID: String? = nil
     
     @EnvironmentObject var sourceModel: SourceModel
     @EnvironmentObject var navigationStateManager: NavigationStateManager
@@ -32,8 +34,10 @@ struct ClippingsSwipeView: View {
     
     @State private var showAlert = false
     @State private var clippingToDelete: Clipping?
-    
-    @State private var expanded: Bool = false
+    @State private var showDetails = false
+    @GestureState private var isPressingImage = false
+    @State private var pendingEdit = false
+    @State private var pendingDelete = false
     
     // Calculate proper image size based on clipping dimensions and available space
     private func calculateImageSize(for clipping: Clipping) -> CGSize {
@@ -110,6 +114,41 @@ struct ClippingsSwipeView: View {
             )
         }
         .frame(maxHeight: .infinity, alignment: .bottom)
+        .sheet(isPresented: $showDetails, onDismiss: {
+            if pendingEdit, clippings.indices.contains(currentIndex) {
+                let clipping = clippings[currentIndex]
+                pendingEdit = false
+                if let sheetPath {
+                    sheetPath.wrappedValue.append(.editClippingView(clipping))
+                } else {
+                    navigationStateManager.selectionPath.append(.editClippingView(clipping))
+                }
+            }
+            if pendingDelete {
+                pendingDelete = false
+                showAlert = true
+            }
+        }) {
+            if clippings.indices.contains(currentIndex) {
+                ClippingDetailsSheet(
+                    clipping: clippings[currentIndex],
+                    onEdit: {
+                        pendingEdit = true
+                        showDetails = false
+                    },
+                    onDelete: {
+                        clippingToDelete = clippings[currentIndex]
+                        pendingDelete = true
+                        showDetails = false
+                    }
+                )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+            }
+        }
+        .onChange(of: currentIndex) { _, _ in
+            showDetails = false
+        }
     }
     
     @ViewBuilder
@@ -158,14 +197,29 @@ struct ClippingsSwipeView: View {
                                 .frame(width: min(imageSize.width, geometry.size.width - 40), height: imageSize.height)
                                 .padding(.vertical)
                                 .padding(.horizontal)
+                                .opacity(isPressingImage ? 0.5 : 1)
                                 .gesture(DragGesture(minimumDistance: 3.0, coordinateSpace: .local)
                                     .onEnded { value in
+                                        if showDetails { return }
                                         if value.translation.width < 0 && currentIndex < clippings.count - 1 {
                                             currentIndex += 1
                                         } else if value.translation.width > 0 && currentIndex > 0 {
                                             currentIndex -= 1
                                         }
                                     }
+                                )
+                                .simultaneousGesture(
+                                    LongPressGesture(minimumDuration: 0.45)
+                                        .onEnded { _ in
+                                            showDetails = true
+                                        }
+                                )
+                                .simultaneousGesture(
+                                    DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                                        .updating($isPressingImage) { value, state, _ in
+                                            let moved = hypot(value.translation.width, value.translation.height) > 12
+                                            state = !moved
+                                        }
                                 )
                             Spacer()
                             // Right chevron button
@@ -225,23 +279,7 @@ struct ClippingsSwipeView: View {
 
             //Spacer()
 
-            // Info box pinned to bottom
-            ClippingInfoBoxView(
-                clipping: clipping,
-                source: source,
-                expanded: $expanded,
-                onEdit: {
-                    if let sheetPath = sheetPath {
-                        sheetPath.wrappedValue.append(.editClippingView(clipping))
-                    } else {
-                        navigationStateManager.selectionPath.append(.editClippingView(clipping))
-                    }
-                },
-                onDelete: {
-                    clippingToDelete = clipping
-                    showAlert = true
-                }
-            )
+            ClippingSummaryBar(clipping: clipping, source: source, dismissToSourceID: dismissToSourceID)
         } // main view VStack
     }
     
@@ -260,12 +298,6 @@ struct ClippingsSwipeView: View {
         updateHeadNameData(clipping: clipping)
     }
 
-    func formatDate(date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .long
-        formatter.timeStyle = .none
-        return formatter.string(from: date)
-    }
     
     func updateClippingTags(clipping: Clipping) {
         for tag in clipping.tags {
@@ -314,127 +346,6 @@ struct ClippingsSwipeView: View {
     
 }
 
-private struct ClippingInfoBoxView: View {
-    let clipping: Clipping
-    let source: Source?
-    @Binding var expanded: Bool
-    let onEdit: () -> Void
-    let onDelete: () -> Void
-    @EnvironmentObject var sourceModel: SourceModel
-    
-    func formatDate(date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .long
-        formatter.timeStyle = .none
-        return formatter.string(from: date)
-    }
-    
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top) {
-                    Text("Source: ").bold()
-                    if let source = source {
-                        NavigationLink(value: SelectionState.sourceView(source), label: {
-                            SourceFormView(source: source)
-                        })
-                    }
-                }
-                if clipping.isHead && !clipping.isBody {
-                    let clippingNameSource = sourceModel.createSourceFromClippingName(clippingName: clipping.name)
-                    HStack {
-                        Text("Name: ").bold()
-                        NavigationLink(value: SelectionState.sourceView(clippingNameSource), label: {
-                            Text(clipping.name)
-                        })
-                    }
-                }
-                Text("Date Added: ").bold() + Text(formatDate(date: clipping.added))
-                (Text("Tags: ").bold() + Text(clipping.tags.joined(separator: ", ")))
-                    .lineLimit(nil)
-                    .multilineTextAlignment(.leading)
-                DisclosureGroup("additional information", isExpanded: $expanded) {
-                    HStack {
-                        Spacer()
-                        VStack(alignment: .leading) {
-                            Text("height = ") + Text(String(format: "%.2f", clipping.height)) + Text(" cm")
-                                .font(.subheadline)
-                            if clipping.headHeight == nil {
-                                Text("head height = N/A")
-                                    .font(.subheadline)
-                            } else {
-                                Text("head height = ") + Text(String(format: "%.2f", clipping.headHeight!)) + Text(" cm")
-                                    .font(.subheadline)
-                            }
-                        }
-                        Spacer()
-                        VStack(alignment: .leading) {
-                            Text("width = ") + Text(String(format: "%.2f", clipping.width)) + Text(" cm")
-                                .font(.subheadline)
-                            if clipping.headWidth == nil {
-                                Text("head width = N/A")
-                                    .font(.subheadline)
-                            } else {
-                                Text("head width = ") + Text(String(format: "%.2f", clipping.headWidth!)) + Text(" cm")
-                                    .font(.subheadline)
-                            }
-                        }
-                        Spacer()
-                    }
-                    .padding(.vertical, 5)
-                    VStack(alignment: .leading, spacing: 5) {
-                        if (clipping.isHead && !clipping.isBody) {
-                            Text("lookingDirection: ") + Text(clipping.lookingDirection ?? "")
-                                .font(.subheadline)
-                        }
-                        Text("id: ") + Text(clipping.id)
-                            .font(.subheadline)
-                        Text("source id: ") + Text(clipping.sourceId)
-                            .font(.subheadline)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    HStack {
-                        Spacer()
-                        VStack(alignment: .leading) {
-                            Text("isHead = ") + Text(String(clipping.isHead))
-                            Text("isBody = ") + Text(String(clipping.isBody))
-                            Text("isAnimal = ") + Text(String(clipping.isAnimal))
-                            Text("isMan = ") + Text(String(clipping.isMan))
-                            Text("isWoman = ") + Text(String(clipping.isWoman))
-                            Text("isTrans = ") + Text(String(clipping.isTrans))
-                        }
-                        Spacer()
-                        VStack(alignment: .leading) {
-                            Text("isWhite = ") + Text(String(clipping.isWhite))
-                            Text("isBlack = ") + Text(String(clipping.isBlack))
-                            Text("isLatino = ") + Text(String(clipping.isLatino))
-                            Text("isAsian = ") + Text(String(clipping.isAsian))
-                            Text("isNative = ") + Text(String(clipping.isNative))
-                            Text("isIndian = ") + Text(String(clipping.isIndian))
-                            Text("isB&W = ") + Text(String(clipping.isBlackAndWhite))
-                        }
-                        Spacer()
-                    }
-                    .padding(.vertical, 5)
-                    Button(action: onEdit) {
-                        Label("Edit Clipping", systemImage: "pencil")
-                    }
-                    Button(role: .destructive, action: onDelete) {
-                        Label("Delete Clipping", systemImage: "trash")
-                    }
-                    .padding(.vertical, 10)
-                }
-                .padding(.bottom, 4)
-            }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 10)
-            .background(Color(.systemGray5))
-            .frame(maxWidth: .infinity, alignment: .center)
-            .clipped()
-        }
-        .frame(maxHeight: 170)
-    }
-}
 
 
 struct ClippingsSwipeView_Previews: PreviewProvider {

@@ -32,6 +32,7 @@ struct SearchClippingView: View {
     // Add state for swipe sheet presentation
     @State private var showSwipeSheet: Bool = false
     @State private var swipeStartIndex: Int = 0
+    @State private var sheetPath: [SelectionState] = []
     @State private var showCollage: Bool = false
     
     @State private var searchHeads: Bool = true
@@ -119,6 +120,29 @@ struct SearchClippingView: View {
     }
     
     var clippings: [Clipping]? = nil
+    /// When set, the search opens on this tag and matches it exactly until the text changes.
+    private let exactTag: String?
+
+    init(clippings: [Clipping]? = nil, exactTag: String? = nil) {
+        self.clippings = clippings
+        self.exactTag = exactTag
+        if let exactTag {
+            _searchText = State(initialValue: exactTag)
+            _searchHeads = State(initialValue: false)
+            _searchTags = State(initialValue: true)
+        }
+    }
+
+    private func tagMatches(_ clipping: Clipping) -> Bool {
+        guard searchTags, !searchText.isEmpty else { return false }
+        let exact = exactTag != nil && searchText.caseInsensitiveCompare(exactTag!) == .orderedSame
+        return clipping.tags.contains { tag in
+            if exact {
+                return tag.caseInsensitiveCompare(searchText) == .orderedSame
+            }
+            return tag.lowercased().contains(searchText.lowercased())
+        }
+    }
     
 //    var filteredClippings: [Clipping] {
 //        if let clippings = clippings {
@@ -204,9 +228,7 @@ struct SearchClippingView: View {
             // Then apply search text filters
             return filteredClippings.filter { clipping in
                 let nameMatch = searchHeads && clipping.name.lowercased().contains(searchText.lowercased())
-                let tagMatch = searchTags && clipping.tags.contains { tag in
-                    tag.lowercased().contains(searchText.lowercased())
-                }
+                let tagMatch = tagMatches(clipping)
                 
                 // If animal or black & white filters are active, show all matching clippings
                 let hasDisplayFilter = filterAnimal || filterBlackAndWhite
@@ -432,8 +454,8 @@ struct SearchClippingView: View {
         }
         // Sheet presentation for ClippingsSwipeView
         .sheet(isPresented: $showSwipeSheet) {
-            NavigationStack {
-                ClippingsSwipeView(clippings: isCollage ? collageHeads : filteredClippings, currentIndex: $swipeStartIndex)
+            NavigationStack(path: $sheetPath) {
+                ClippingsSwipeView(clippings: isCollage ? collageHeads : filteredClippings, currentIndex: $swipeStartIndex, sheetPath: $sheetPath)
                     .environmentObject(sourceModel)
                     .environmentObject(navigationStateManager)
                     .environment(\.managedObjectContext, managedObjectContext)
@@ -453,12 +475,18 @@ struct SearchClippingView: View {
                             EditClippingSourceView(clipping: clipping)
                                 .environmentObject(sourceModel)
                                 .environmentObject(navigationStateManager)
+                        case .searchForTag(let tag):
+                            SearchClippingView(exactTag: tag)
+                                .environmentObject(sourceModel)
+                                .environmentObject(navigationStateManager)
+                                .environment(\.managedObjectContext, managedObjectContext)
                         default:
                             EmptyView()
                         }
                     }
             }
             .presentationSizing(.page)
+            .onDisappear { sheetPath = [] }
         }
         
         

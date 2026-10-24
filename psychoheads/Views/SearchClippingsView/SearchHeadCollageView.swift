@@ -85,6 +85,15 @@ enum SearchCollageLayout {
     }
 }
 
+/// Lets the zoom badge call into the scroll view without owning it.
+final class CollageZoomControl {
+    fileprivate weak var controller: CollageZoomController?
+
+    func toggleLifeSize() {
+        controller?.toggleLifeSize()
+    }
+}
+
 struct SearchHeadCollageView: View {
     let clippings: [Clipping]
     let placeholder: UIImage
@@ -92,6 +101,7 @@ struct SearchHeadCollageView: View {
 
     /// 1.0 is life size: the centimeters-to-points scale used to lay out the canvas.
     @State private var zoomScale: CGFloat = 1
+    @State private var zoomControl = CollageZoomControl()
 
     var body: some View {
         let layout = SearchCollageLayout.pack(clippings)
@@ -100,6 +110,7 @@ struct SearchHeadCollageView: View {
                 items: layout.items,
                 canvasSize: layout.canvas,
                 placeholder: placeholder,
+                zoomControl: zoomControl,
                 onSelect: onSelect,
                 onZoomScaleChange: { zoomScale = $0 }
             )
@@ -108,23 +119,26 @@ struct SearchHeadCollageView: View {
     }
 
     private var zoomBadge: some View {
-        HStack(spacing: 4) {
-            Image(systemName: zoomScale > 1.01 ? "square.resize.up" : "square.resize.down")
-                .font(.caption)
-            Text(zoomLabel)
-                .font(.caption)
-                .fontWeight(.medium)
+        Button {
+            zoomControl.toggleLifeSize()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: zoomScale > 1.01 ? "square.resize.up" : "square.resize.down")
+                    .font(.caption)
+                Text(zoomLabel)
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+            .padding(6)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(.systemBackground).opacity(0.9))
+                    .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+            )
         }
-        .padding(6)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color(.systemBackground).opacity(0.9))
-                .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
-        )
+        .buttonStyle(.plain)
         .padding(.trailing, 10)
         .padding(.bottom, 10)
-        .allowsHitTesting(false)
-        .accessibilityElement(children: .combine)
         .accessibilityLabel("Zoom \(zoomLabel) of real size")
     }
 
@@ -140,6 +154,7 @@ private struct CollageCanvas: View {
     let items: [PlacedClipping]
     let canvasSize: CGSize
     let placeholder: UIImage
+    var pressedID: String? = nil
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -152,6 +167,7 @@ private struct CollageCanvas: View {
                     frameHeight: item.frame.height
                 )
                 .frame(width: item.frame.width, height: item.frame.height)
+                .opacity(item.id == pressedID ? 0.5 : 1)
                 .position(x: item.frame.midX, y: item.frame.midY)
             }
         }
@@ -163,21 +179,25 @@ private struct SearchCollageZoomRepresentable: UIViewControllerRepresentable {
     let items: [PlacedClipping]
     let canvasSize: CGSize
     let placeholder: UIImage
+    let zoomControl: CollageZoomControl
     let onSelect: (Clipping) -> Void
     let onZoomScaleChange: (CGFloat) -> Void
 
     func makeUIViewController(context: Context) -> CollageZoomController {
-        CollageZoomController()
+        let controller = CollageZoomController()
+        zoomControl.controller = controller
+        return controller
     }
 
     func updateUIViewController(_ controller: CollageZoomController, context: Context) {
+        zoomControl.controller = controller
         controller.onSelect = onSelect
         controller.onZoomScaleChange = onZoomScaleChange
         controller.setContent(items: items, canvasSize: canvasSize, placeholder: placeholder)
     }
 }
 
-final class CollageZoomController: UIViewController, UIScrollViewDelegate {
+final class CollageZoomController: UIViewController, UIScrollViewDelegate, UIGestureRecognizerDelegate {
     let scrollView = UIScrollView()
     var onSelect: ((Clipping) -> Void)?
     var onZoomScaleChange: ((CGFloat) -> Void)?
@@ -186,6 +206,9 @@ final class CollageZoomController: UIViewController, UIScrollViewDelegate {
     private var canvasContainer: CanvasContainer?
     private var items: [PlacedClipping] = []
     private var canvasSize: CGSize = .zero
+    private var placeholder = UIImage()
+    private var pressedID: String?
+    private var pressOrigin: CGPoint = .zero
     private var contentSignature = ""
     private var lastBoundsSize: CGSize = .zero
     private var didSetInitialZoom = false
@@ -207,8 +230,18 @@ final class CollageZoomController: UIViewController, UIScrollViewDelegate {
         doubleTap.numberOfTapsRequired = 2
         let singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap(_:)))
         singleTap.require(toFail: doubleTap)
+        let press = UILongPressGestureRecognizer(target: self, action: #selector(handlePress(_:)))
+        press.minimumPressDuration = 0
+        press.cancelsTouchesInView = false
+        press.delaysTouchesEnded = false
+        press.delegate = self
         scrollView.addGestureRecognizer(doubleTap)
         scrollView.addGestureRecognizer(singleTap)
+        scrollView.addGestureRecognizer(press)
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        gestureRecognizer is UILongPressGestureRecognizer
     }
 
     override func viewDidLayoutSubviews() {
@@ -227,8 +260,9 @@ final class CollageZoomController: UIViewController, UIScrollViewDelegate {
 
         guard canvasSize.width > 0, canvasSize.height > 0 else { return }
         self.canvasSize = canvasSize
+        self.placeholder = placeholder
 
-        let canvas = CollageCanvas(items: items, canvasSize: canvasSize, placeholder: placeholder)
+        let canvas = CollageCanvas(items: items, canvasSize: canvasSize, placeholder: placeholder, pressedID: pressedID)
         if let host {
             if changed {
                 host.rootView = canvas
@@ -329,9 +363,53 @@ final class CollageZoomController: UIViewController, UIScrollViewDelegate {
         }
     }
 
+    /// Not at life size: animate to 1x. Already at life size: animate to the fit scale.
+    func toggleLifeSize() {
+        let target: CGFloat = abs(scrollView.zoomScale - 1) < 0.01 ? scrollView.minimumZoomScale : 1
+        scrollView.setZoomScale(target, animated: true)
+    }
+
     @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
         let opening = min(fitScale(), 1)
         scrollView.setZoomScale(opening, animated: true)
+    }
+
+    @objc private func handlePress(_ gesture: UILongPressGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            pressOrigin = gesture.location(in: scrollView)
+            setPressed(clippingID(at: gesture))
+        case .changed:
+            let location = gesture.location(in: scrollView)
+            let moved = hypot(location.x - pressOrigin.x, location.y - pressOrigin.y)
+            if moved > 12 {
+                setPressed(nil)
+            } else {
+                setPressed(clippingID(at: gesture))
+            }
+        case .ended, .cancelled, .failed:
+            setPressed(nil)
+        default:
+            break
+        }
+    }
+
+    private func clippingID(at gesture: UIGestureRecognizer) -> String? {
+        guard let canvasContainer else { return nil }
+        let point = gesture.location(in: canvasContainer)
+        return items.first(where: { $0.frame.contains(point) })?.id
+    }
+
+    private func setPressed(_ id: String?) {
+        guard pressedID != id else { return }
+        pressedID = id
+        guard canvasSize.width > 0, canvasSize.height > 0 else { return }
+        host?.rootView = CollageCanvas(
+            items: items,
+            canvasSize: canvasSize,
+            placeholder: placeholder,
+            pressedID: id
+        )
     }
 
     @objc private func handleSingleTap(_ gesture: UITapGestureRecognizer) {

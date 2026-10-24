@@ -27,8 +27,10 @@ struct ClippingView: View {
     
     @State private var showAlert = false
     @State private var clippingToDelete: Clipping?
-    
-    @State private var expanded: Bool = false
+    @State private var showDetails = false
+    @State private var isPressingImage = false
+    @State private var pendingEdit = false
+    @State private var pendingDelete = false
     
     var source: Source? {
         sourceModel.sources.first { $0.id == clipping.sourceId }
@@ -40,142 +42,43 @@ struct ClippingView: View {
             AsyncImage2(clipping: clipping, placeholder: clipping.imageThumb ?? UIImage(), imageUrlMid: clipping.imageUrlMid, frameHeight: 450)
                 .padding(.vertical)
                 .padding(.horizontal)
-            
-            ScrollView {
-                VStack(alignment: .leading, spacing: 10) {
-                    
-                    HStack(alignment: .top) {
-                        Text("Source: ").bold()
-                        if let source = source {
-                            NavigationLink(value: SelectionState.sourceView(source), label: {
-                                SourceFormView(source: source)
-                            })
-//                            VStack(alignment: .leading) {
-//                                Text(source.title)
-//                                    .fontWeight(.semibold)
-//                                if let issue = source.issue, !issue.isEmpty {
-//                                    Text(source.issue!)
-//                                        .font(.subheadline)
-//                                }
-//                                Text(source.dateString)
-//                                    .font(.subheadline)
-//                            }
-                        }
-                    }
-                    
-                    if clipping.isHead && !clipping.isBody {
-                        var clippingNameSource = sourceModel.createSourceFromClippingName(clippingName: clipping.name)
-                        HStack {
-                            Text("Name: ").bold()
-                            NavigationLink(value: SelectionState.sourceView(clippingNameSource), label: {
-                                Text("\(clipping.name)")
-                                }
-                            )
-                        }
-                    }
+                .opacity(isPressingImage ? 0.5 : 1)
+                .onLongPressGesture(minimumDuration: 0.45, perform: {
+                    showDetails = true
+                }, onPressingChanged: { pressing in
+                    isPressingImage = pressing
+                })
 
-                    Text("Date Added: ").bold() + Text("\(formatDate(date: clipping.added))")
-                    Text("Tags: ").bold() + Text("\(clipping.tags.joined(separator: ", "))")
-                    DisclosureGroup("additional information", isExpanded: $expanded) {
-                        
-                        HStack {
-                            Spacer()
-                            VStack(alignment: .leading) {
-                                Text("height = \(String(format: "%.2f", clipping.height)) cm")
-                                    .font(.subheadline)
-                                if clipping.headHeight == nil {
-                                    Text("head height = N/A")
-                                        .font(.subheadline)
-                                } else {
-                                    Text("head height = \(String(format: "%.2f", clipping.headHeight!)) cm")
-                                        .font(.subheadline)
-                                }
-                            }
-                            Spacer()
-                            VStack(alignment: .leading) {
-                                Text("width = \(String(format: "%.2f", clipping.width)) cm")
-                                    .font(.subheadline)
-                                if clipping.headWidth == nil {
-                                    Text("head width = N/A")
-                                        .font(.subheadline)
-                                } else {
-                                    Text("head width = \(String(format: "%.2f", clipping.headWidth!)) cm")
-                                        .font(.subheadline)
-                                }
-                            }
-                            Spacer()
-                        }
-                        .padding(.vertical, 5)
-                        
-                        VStack(alignment: .leading, spacing: 5) {
-                            if (clipping.isHead && !clipping.isBody) {
-                                Text("lookingDirection: \(clipping.lookingDirection ?? "")")
-                                    .font(.subheadline)
+            Spacer(minLength: 0)
 
-                            }
-                            Text("id: \(clipping.id)")
-                                .font(.subheadline)
-                            Text("source id: \(clipping.sourceId)")
-                                .font(.subheadline)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        
-                        HStack {
-                            Spacer()
-                            VStack(alignment: .leading) {
-                                Text("isHead = \(String(clipping.isHead))")
-                                Text("isBody = \(String(clipping.isBody))")
-                                Text("isAnimal = \(String(clipping.isAnimal))")
-                                Text("isMan = \(String(clipping.isMan))")
-                                Text("isWoman = \(String(clipping.isWoman))")
-                                Text("isTrans = \(String(clipping.isTrans))")
-                            }
-                            Spacer()
-                            VStack(alignment: .leading) {
-                                Text("isWhite = \(String(clipping.isWhite))")
-                                Text("isBlack = \(String(clipping.isBlack))")
-                                Text("isLatino = \(String(clipping.isLatino))")
-                                Text("isAsian = \(String(clipping.isAsian))")
-                                Text("isNative = \(String(clipping.isNative))")
-                                Text("isIndian = \(String(clipping.isIndian))")
-                                Text("isB&W = \(String(clipping.isBlackAndWhite))")
-                            }
-                            Spacer()
-                        }
-                        .padding(.vertical, 5)
-                        
-//                        VStack(alignment: .leading, spacing: 5) {
-//                            Text("image ULR = \(clipping.imageUrl)")
-//                            Text("image ULR (mid) = \(clipping.imageUrlMid)")
-//                            Text("image ULR (thumb) = \(clipping.imageUrlThumb)")
-//                        }
-//                        .frame(maxWidth: .infinity, alignment: .leading)
-                        
-                        Spacer()
-                        
-                        NavigationLink(value: SelectionState.editClippingView(clipping), label: {
-                            Label("Edit Clipping", systemImage: "pencil")
-                        })
-                            
-                        Button(role: .destructive) {
-                            clippingToDelete = clipping
-                            showAlert = true
-                        } label: {
-                            Label("Delete Clipping", systemImage: "trash")
-                        }
-                        .padding(.vertical,10)
-                        
-                    } // DisclosureGroup
-                } // text VStack
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .padding(.horizontal, 10)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color(.systemGray5)))
-            }
-                
-            
+            ClippingSummaryBar(clipping: clipping, source: source)
         } // main view VStack
         .padding(.horizontal, 10)
+        .sheet(isPresented: $showDetails, onDismiss: {
+            if pendingEdit {
+                pendingEdit = false
+                navigationStateManager.selectionPath.append(.editClippingView(clipping))
+            }
+            if pendingDelete {
+                pendingDelete = false
+                showAlert = true
+            }
+        }) {
+            ClippingDetailsSheet(
+                clipping: clipping,
+                onEdit: {
+                    pendingEdit = true
+                    showDetails = false
+                },
+                onDelete: {
+                    clippingToDelete = clipping
+                    pendingDelete = true
+                    showDetails = false
+                }
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
         .alert(isPresented: $showAlert) {
             Alert(title: Text("Delete Clipping"),
                   message: Text("Are you sure you want to delete this clipping from the database?"),
@@ -195,13 +98,6 @@ struct ClippingView: View {
         
     }
 
-    func formatDate(date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .long
-        formatter.timeStyle = .none
-        return formatter.string(from: date)
-    }
-    
     func updateClippingTags(clipping: Clipping) {
         for tag in clipping.tags {
             let fetchRequest: NSFetchRequest<ClippingTag> = ClippingTag.fetchRequest()

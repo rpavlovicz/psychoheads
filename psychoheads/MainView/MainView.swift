@@ -102,6 +102,10 @@ struct MainView: View {
                         SearchClippingView(clippings: clippings)
                             .environmentObject(sourceModel)
                             .environmentObject(navigationStateManager)
+                    case .searchForTag(let tag):
+                        SearchClippingView(exactTag: tag)
+                            .environmentObject(sourceModel)
+                            .environmentObject(navigationStateManager)
                     case .editClippingView(let clipping):
                         EditClippingView(clipping: clipping)
                             .environmentObject(sourceModel)
